@@ -1,0 +1,171 @@
+module MiniAgent
+  VERSION: String
+
+  type json_object = Hash[String, untyped]
+  type message = Hash[Symbol, untyped]
+  type tool_call = Hash[String, untyped]
+
+  class Error < StandardError
+  end
+
+  class TimeoutError < Error
+  end
+
+  class LLMError < Error
+  end
+
+  module Messages
+    SYSTEM_PROMPT: String
+    STOP_MAX_TURNS: String
+  end
+
+  module Color
+    CODES: Hash[Symbol, String]
+    RESET: String
+
+    def self.paint: (untyped text, *Symbol styles, ?enabled: bool) -> String
+    def self.red: (untyped text, ?enabled: bool) -> String
+    def self.green: (untyped text, ?enabled: bool) -> String
+    def self.yellow: (untyped text, ?enabled: bool) -> String
+    def self.blue: (untyped text, ?enabled: bool) -> String
+    def self.cyan: (untyped text, ?enabled: bool) -> String
+    def self.gray: (untyped text, ?enabled: bool) -> String
+    def self.bold: (untyped text, ?enabled: bool) -> String
+  end
+
+  class Config
+    DEFAULTS: Hash[Symbol, untyped]
+    ENV_KEYS: Hash[Symbol, String]
+
+    attr_reader base_url: String
+    attr_reader api_key: String
+    attr_reader model: String
+    attr_reader max_turns: Integer
+    attr_reader retry_count: Integer
+    attr_reader retry_delay: Float
+    attr_reader max_tokens: Integer
+    attr_reader timeout: Float
+
+    def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
+    def allow_unsafe?: () -> bool
+    def chat_uri: () -> URI::Generic
+    def use_ssl?: () -> bool
+  end
+
+  class Conversation
+    def initialize: (?system_prompt: String?) -> void
+    def system: (String content) -> message
+    def user: (String content) -> message
+    def assistant: (String? content, ?tool_calls: Array[tool_call]?) -> message
+    def tool: (String tool_call_id, String content) -> message
+    def to_a: () -> Array[message]
+    def last: () -> message?
+    def size: () -> Integer
+    def empty?: () -> bool
+    def self.tool_call_id: (tool_call) -> String
+  end
+
+  class ProcessRunner
+    class Result < Struct[untyped]
+      attr_accessor stdout: String
+      attr_accessor stderr: String
+      attr_accessor exit_code: Integer
+      def success?: () -> bool
+    end
+
+    attr_reader timeout: Numeric
+
+    def initialize: (?timeout: Numeric, ?poll_interval: Numeric) -> void
+    def call: (String command) -> Result
+  end
+
+  class Prompt
+    def initialize: (?input: IO, ?output: IO) -> void
+    def confirm?: (String question) -> bool
+
+    class AutoApprove
+      def confirm?: (String question) -> bool
+    end
+
+    class AutoDeny
+      def confirm?: (String question) -> bool
+    end
+  end
+
+  class CommandGuard
+    DANGEROUS_PATTERNS: Array[Regexp]
+
+    def initialize: (?allow_unsafe: bool, ?prompt: untyped, ?ui: UI?) -> void
+    def self.dangerous?: (String command) -> bool
+    def authorize?: (String command) -> bool
+  end
+
+  module Tools
+    class Bash
+      NAME: String
+      SCHEMA: json_object
+
+      def initialize: (guard: CommandGuard, runner: ProcessRunner) -> void
+      def name: () -> String
+      def schema: () -> json_object
+      def call: (json_object arguments) -> String
+    end
+  end
+
+  class ToolRegistry
+    def initialize: (?Array[untyped] tools) -> void
+    def register: (untyped tool) -> self
+    def schemas: () -> Array[json_object]
+    def names: () -> Array[String]
+    def empty?: () -> bool
+    def dispatch: (String name, json_object arguments) -> String
+  end
+
+  class UI
+    PREVIEW_LINES: Integer
+    PREVIEW_CHARS: Integer
+    SPINNER_FRAMES: Array[String]
+    SPINNER_INTERVAL: Float
+
+    def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric) -> void
+    def tty?: () -> bool
+    def puts: (?untyped text) -> void
+    def print: (untyped text) -> void
+    def banner: (String text) -> void
+    def assistant: (String content, ?label: String) -> void
+    def warn: (String text) -> void
+    def error: (String text) -> void
+    def success: (String text) -> void
+    def tool_call: (String name, json_object arguments) -> void
+    def tool_result: (String result) -> void
+    def with_spinner: [T] () { () -> T } -> T
+  end
+
+  class LLMClient
+    RETRIABLE: Array[Class]
+    OPEN_TIMEOUT: Integer
+    READ_TIMEOUT: Integer
+
+    def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped) -> void
+    def start: [T] () { (LLMClient) -> T } -> T
+    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call]]
+  end
+
+  class Agent
+    MAX_TOOL_OUTPUT: Integer
+
+    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI) -> void
+    def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
+    def interactive: (?input: IO) -> Conversation
+  end
+
+  class CLI
+    EXIT_OK: Integer
+    EXIT_USAGE: Integer
+    FLAGS: Array[Array[untyped]]
+
+    def self.start: (Array[String] argv, ?out: IO, ?input: IO) -> Integer
+    def initialize: (?out: IO, ?input: IO) -> void
+    def start: (Array[String] argv) -> Integer
+  end
+end

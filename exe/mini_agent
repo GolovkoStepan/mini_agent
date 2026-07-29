@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "mini_agent"
+
+# Ctrl+C и SIGTERM должны завершать агента штатно, а не стектрейсом.
+trap("INT") { raise Interrupt }
+trap("TERM") { raise Interrupt }
+
+exit MiniAgent::CLI.start(ARGV)

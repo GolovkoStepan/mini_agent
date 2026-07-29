@@ -1,0 +1,83 @@
+# frozen_string_literal: true
+
+RSpec.describe MiniAgent::Conversation do
+  it "начинается с системного сообщения" do
+    conversation = described_class.new(system_prompt: "правила")
+
+    expect(conversation.to_a).to eq([{ role: "system", content: "правила" }])
+  end
+
+  it "не добавляет системное сообщение, если промпт равен nil" do
+    expect(described_class.new(system_prompt: nil)).to be_empty
+  end
+
+  it "сохраняет порядок сообщений" do
+    conversation = described_class.new(system_prompt: "s")
+    conversation.user("привет")
+    conversation.assistant("ответ")
+
+    expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user assistant])
+  end
+
+  it "использует символьные ключи" do
+    conversation = described_class.new(system_prompt: "s")
+    conversation.user("задача")
+
+    expect(conversation.last.keys).to all(be_a(Symbol))
+  end
+
+  describe "#assistant" do
+    it "не добавляет tool_calls, когда их нет" do
+      conversation = described_class.new(system_prompt: nil)
+      conversation.assistant("текст")
+
+      expect(conversation.last).to eq({ role: "assistant", content: "текст" })
+    end
+
+    it "прикладывает tool_calls к сообщению" do
+      calls = [{ "id" => "call_1", "function" => { "name" => "bash" } }]
+      conversation = described_class.new(system_prompt: nil)
+      conversation.assistant(nil, tool_calls: calls)
+
+      expect(conversation.last[:tool_calls]).to eq(calls)
+    end
+
+    # API требует именно null, а не пустую строку, когда текста нет.
+    it "превращает пустой текст в nil" do
+      conversation = described_class.new(system_prompt: nil)
+      conversation.assistant("", tool_calls: [{ "id" => "x" }])
+
+      expect(conversation.last[:content]).to be_nil
+    end
+  end
+
+  describe "#tool" do
+    it "записывает ответ инструмента с идентификатором вызова" do
+      conversation = described_class.new(system_prompt: nil)
+      conversation.tool("call_7", "вывод")
+
+      expect(conversation.last).to eq({ role: "tool", tool_call_id: "call_7", content: "вывод" })
+    end
+  end
+
+  describe ".tool_call_id" do
+    it "берёт идентификатор из ответа модели" do
+      expect(described_class.tool_call_id({ "id" => "call_abc" })).to eq("call_abc")
+    end
+
+    it "генерирует идентификатор, если модель его не прислала" do
+      expect(described_class.tool_call_id({})).to match(/\Acall_[0-9a-f]{16}\z/)
+    end
+
+    it "генерирует идентификатор, если он пустой" do
+      expect(described_class.tool_call_id({ "id" => "" })).to match(/\Acall_[0-9a-f]{16}\z/)
+    end
+  end
+
+  it "не даёт менять историю через возвращённый массив" do
+    conversation = described_class.new(system_prompt: "s")
+    conversation.to_a.first[:content] = "подмена"
+
+    expect(conversation.last[:content]).to eq("s")
+  end
+end

@@ -1,0 +1,58 @@
+AllCops:
+  TargetRubyVersion: 3.1
+  NewCops: enable
+  Exclude:
+    - "vendor/**/*"
+
+# Спеки описательные, длина блоков здесь не показатель сложности.
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+    - "mini_agent.gemspec"
+
+Metrics/MethodLength:
+  Max: 18
+
+# Разбор ответа LLM и цикл агента линейны: дробить их ради метрики
+# означало бы разнести по методам последовательность из проверок подряд.
+Metrics/AbcSize:
+  Max: 22
+
+Metrics/CyclomaticComplexity:
+  Max: 8
+
+Metrics/ClassLength:
+  Max: 130
+
+# ui:, id, io — устоявшиеся короткие имена, читаются однозначно.
+Naming/MethodParameterName:
+  AllowedNames:
+    - ui
+    - id
+    - io
+    - to
+
+# Русские строки в сообщениях — норма для этого проекта.
+Style/AsciiComments:
+  Enabled: false
+
+# Блок у webmock-матчера `.with { |req| ... }` — это условие проверки, а не
+# процедура. Автокоррекция переписывала его в do...end, после чего блок
+# привязывался к внешнему `expect`, а не к `.with`: матчер переставал
+# проверять тело запроса, и тест проходил при любом ответе. Ошибка тихая —
+# и rubocop, и rspec остаются зелёными. Исключаем `with` из правила.
+Style/BlockDelimiters:
+  AllowedMethods:
+    - lambda
+    - proc
+    - it
+    - with
+
+Layout/LineLength:
+  Max: 120
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
