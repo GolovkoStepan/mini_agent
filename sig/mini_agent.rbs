@@ -17,6 +17,11 @@ module MiniAgent
   module Messages
     SYSTEM_PROMPT: String
     STOP_MAX_TURNS: String
+    EXIT_CODE_PATTERN: Regexp
+
+    # Строки, уходящие результатом инструмента в модель, а не в терминал.
+    module Tool
+    end
   end
 
   module Color
@@ -124,18 +129,20 @@ module MiniAgent
   class UI
     PREVIEW_LINES: Integer
     PREVIEW_CHARS: Integer
+    BULLET: String
+    BRANCH: String
+    INDENT: String
     SPINNER_FRAMES: Array[String]
     SPINNER_INTERVAL: Float
 
     def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric) -> void
     def tty?: () -> bool
+    def status=: (String? text) -> void
     def puts: (?untyped text) -> void
     def print: (untyped text) -> void
-    def banner: (String text) -> void
-    def assistant: (String content, ?label: String) -> void
+    def assistant: (String content) -> void
     def warn: (String text) -> void
     def error: (String text) -> void
-    def success: (String text) -> void
     def tool_call: (String name, json_object arguments) -> void
     def tool_result: (String result) -> void
     def with_spinner: [T] () { () -> T } -> T
@@ -162,7 +169,9 @@ module MiniAgent
   class CLI
     EXIT_OK: Integer
     EXIT_USAGE: Integer
+    EXIT_CONNECT: Integer
     FLAGS: Array[Array[untyped]]
+    CONNECT_ERRORS: Array[Class]
 
     def self.start: (Array[String] argv, ?out: IO, ?input: IO) -> Integer
     def initialize: (?out: IO, ?input: IO) -> void

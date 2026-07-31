@@ -95,6 +95,55 @@ RSpec.describe MiniAgent::CLI do
     end
   end
 
+  # Соединение открывается в LLMClient#start, до первого запроса, поэтому
+  # webmock здесь не подходит: он перехватывает запросы, а не установку
+  # соединения. Подменяем сам start.
+  describe "недоступный LLM" do
+    def fail_connection_with(error)
+      allow_any_instance_of(MiniAgent::LLMClient).to receive(:start).and_raise(error)
+    end
+
+    it "сообщает адрес и способ его сменить вместо бэктрейса" do
+      fail_connection_with(Net::OpenTimeout.new("Failed to open TCP connection to 10.0.0.1:1234"))
+
+      code = start(["--base-url", "http://10.0.0.1:1234/v1", "задача"])
+
+      expect(code).to eq(2)
+      expect(out.string).to include("Не удалось подключиться к LLM: http://10.0.0.1:1234/v1")
+      expect(out.string).to include("Failed to open TCP connection")
+      expect(out.string).to include("--base-url")
+    end
+
+    it "обрабатывает отказ в соединении" do
+      fail_connection_with(Errno::ECONNREFUSED)
+
+      expect(start(["--base-url", "http://127.0.0.1:1/v1", "задача"])).to eq(2)
+      expect(out.string).to include("Не удалось подключиться")
+    end
+
+    # Тот же путь в интерактивном режиме: агент не стартовал, приглашения нет.
+    it "не открывает диалог, если соединение не поднялось" do
+      fail_connection_with(Errno::ECONNREFUSED)
+
+      code = start(["-i", "--base-url", "http://127.0.0.1:1/v1"], input: StringIO.new("задача\nexit\n"))
+
+      expect(code).to eq(2)
+      expect(out.string).to include("Не удалось подключиться")
+      expect(out.string).not_to include("До свидания!")
+    end
+
+    # Совет «проверьте, что сервер запущен» здесь был бы ложным следом.
+    it "отдельно сообщает о некорректном адресе" do
+      fail_connection_with(URI::InvalidURIError)
+
+      code = start(["--base-url", "http://[кривой", "задача"])
+
+      expect(code).to eq(2)
+      expect(out.string).to include("Некорректный адрес LLM")
+      expect(out.string).not_to include("сервер запущен")
+    end
+  end
+
   describe "интерактивный режим" do
     it "запускается и завершается по exit" do
       stub_request(:post, "http://cli.test/v1/chat/completions").to_return(

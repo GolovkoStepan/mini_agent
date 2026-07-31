@@ -9,3 +9,6 @@
 
 # rspec failure tracking
 .rspec_status
+
+# собранный гем: make build кладёт его в корень репозитория
+*.gem

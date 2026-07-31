@@ -25,7 +25,9 @@ module MiniAgent
       conversation.user(user_message) if user_message
 
       @config.max_turns.times do |index|
-        @ui.banner(format(Messages::TURN, number: index + 1))
+        # Номер хода виден только в спиннере и стирается вместе с ним:
+        # в логе работы эта бухгалтерия не нужна.
+        @ui.status = format(Messages::TURN, number: index + 1, total: @config.max_turns)
 
         content, tool_calls = request(conversation)
         return conversation if content.nil? # сетевая ошибка, история сохранена
@@ -43,12 +45,12 @@ module MiniAgent
 
     # Интерактивный режим: одна история на всю сессию.
     def interactive(input: $stdin)
-      @ui.puts(Color.paint(Messages::INTERACTIVE_HEADER, :cyan, :bold, enabled: @ui.tty?))
+      @ui.assistant(Messages::INTERACTIVE_HEADER)
       @ui.puts(Messages::INTERACTIVE_HINT)
       conversation = Conversation.new
 
       loop do
-        @ui.print("\n> ")
+        @ui.print("\n#{Messages::PROMPT_SIGN}")
         line = input.gets
         break if line.nil?
 
@@ -72,12 +74,13 @@ module MiniAgent
       nil
     end
 
+    # Отдельного «готово» не печатаем: финальный ответ модели уже показан
+    # выше и сам по себе означает завершение.
     def finish(conversation, content)
       if content.empty?
         @ui.warn(Messages::EMPTY_RESPONSE)
       else
         conversation.assistant(content)
-        @ui.success(Messages::AGENT_DONE)
       end
       conversation
     end
@@ -138,7 +141,7 @@ module MiniAgent
       end
 
       unless content.empty?
-        @ui.assistant(content, label: Messages::SUMMARY)
+        @ui.assistant(content)
         conversation.assistant(content)
       end
       conversation

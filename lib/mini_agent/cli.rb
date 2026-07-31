@@ -1,12 +1,23 @@
 # frozen_string_literal: true
 
 require "optparse"
+require "net/http"
+require "uri"
 
 module MiniAgent
   # Разбор аргументов командной строки и сборка объектов агента.
   class CLI
     EXIT_OK = 0
     EXIT_USAGE = 1
+    EXIT_CONNECT = 2
+
+    # Ошибки открытия соединения: сервер не отвечает, не запущен, недоступен.
+    # Ловятся отдельно от ошибок самих запросов (те обрабатывает Agent#request),
+    # потому что здесь агент ещё не стартовал и продолжать нечего.
+    CONNECT_ERRORS = [
+      Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH,
+      Errno::ENETUNREACH, Errno::ETIMEDOUT, SocketError
+    ].freeze
 
     # Описание флагов таблицей: [ключ настроек, *аргументы OptionParser#on].
     # Значение флага кладётся в options под указанным ключом.
@@ -55,16 +66,28 @@ module MiniAgent
       config = Config.new(options)
       ui = UI.new(out: @out)
 
-      if options[:interactive]
-        with_agent(config, ui) { |agent| agent.interactive(input: @input) }
-        return EXIT_OK
-      end
+      return with_connection(config, ui) { |agent| agent.interactive(input: @input) } if options[:interactive]
 
       task = args.join(" ").strip
       return usage(parser) if task.empty?
 
-      with_agent(config, ui) { |agent| agent.run(task) }
+      with_connection(config, ui) { |agent| agent.run(task) }
+    end
+
+    # Соединение не открылось — показываем адрес и как его сменить вместо
+    # сырого бэктрейса Net::HTTP.
+    def with_connection(config, ui, &)
+      with_agent(config, ui, &)
       EXIT_OK
+    rescue *CONNECT_ERRORS => e
+      ui.error(format(Messages::CONNECT_FAILED, url: config.base_url))
+      ui.puts(format(Messages::CONNECT_REASON, message: e.message))
+      ui.puts(Messages::CONNECT_HINT)
+      EXIT_CONNECT
+    rescue URI::InvalidURIError
+      ui.error(format(Messages::INVALID_URL, url: config.base_url))
+      ui.puts(Messages::INVALID_URL_HINT)
+      EXIT_CONNECT
     end
 
     # Соединение с LLM живёт ровно столько, сколько работает агент.

@@ -41,7 +41,7 @@ RSpec.describe MiniAgent::Agent do
 
       expect(client).to have_received(:chat).once
       expect(conversation.last).to eq({ role: "assistant", content: "всё готово" })
-      expect(out.string).to include("успешно завершил работу")
+      expect(out.string).to include("● всё готово")
     end
 
     it "сообщает о пустом ответе без вызовов инструментов" do

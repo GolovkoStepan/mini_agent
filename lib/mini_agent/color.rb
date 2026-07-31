@@ -14,7 +14,10 @@ module MiniAgent
       yellow: "\e[33m",
       blue: "\e[34m",
       cyan: "\e[36m",
-      gray: "\e[37m",
+      # \e[37m — обычный белый: на светлой теме он неотличим от основного
+      # текста. Приглушённый серый — это bright black.
+      gray: "\e[90m",
+      dim: "\e[2m",
       bold: "\e[1m"
     }.freeze
 

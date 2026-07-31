@@ -16,7 +16,7 @@ bin/setup
 
 ```bash
 gem build mini_agent.gemspec
-gem install ./mini_agent-0.1.0.gem
+gem install ./mini_agent-0.2.0.gem
 ```
 
 ## Использование
