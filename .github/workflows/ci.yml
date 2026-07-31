@@ -1,0 +1,46 @@
+# Тесты, линтер и проверка сигнатур на всех поддерживаемых версиях Ruby.
+#
+# Шаги повторяют цели Makefile один в один — CI не должен проверять не то,
+# что проверяет разработчик у себя. Если меняется команда, менять надо в
+# Makefile, а сюда только прокидывать цель.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Падение на одной версии не отменяет прогон остальных: полезно знать,
+      # сломалось везде или только на новой.
+      fail-fast: false
+      matrix:
+        # Нижняя граница — required_ruby_version из гемспека, верхняя — текущий
+        # стабильный релиз. Обе должны меняться вместе с гемспеком.
+        ruby: ["3.2", "3.3", "3.4"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # bundler-cache: true сам ставит зависимости и кэширует их между
+      # запусками — отдельный шаг bundle install не нужен.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+
+      - name: Тесты
+        run: make spec
+
+      - name: Линтер
+        run: make lint
+
+      # rbs идёт после тестов: сигнатуры расходятся с кодом реже, чем
+      # ломаются тесты, и первым в логе хочется видеть более частый отказ.
+      - name: Сигнатуры типов
+        run: make rbs

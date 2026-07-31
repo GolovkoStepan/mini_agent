@@ -1,5 +1,7 @@
 # MiniAgent
 
+[![CI](https://github.com/GolovkoStepan/mini_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/GolovkoStepan/mini_agent/actions/workflows/ci.yml)
+
 Минимальный кодовый агент на Ruby: получает задачу, планирует шаги, выполняет shell-команды через LLM с поддержкой tool calling и возвращает результат.
 
 Работает с любым OpenAI-совместимым эндпоинтом `/chat/completions` — LM Studio, Ollama, vLLM или облачный провайдер.
@@ -7,7 +9,7 @@
 ## Установка
 
 ```bash
-git clone https://github.com/s-golovko/mini_agent.git
+git clone https://github.com/GolovkoStepan/mini_agent.git
 cd mini_agent
 bin/setup
 ```

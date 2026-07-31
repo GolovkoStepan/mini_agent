@@ -13,9 +13,11 @@ Gem::Specification.new do |spec|
                      "вызывая shell-команды через LLM с поддержкой tool calling. " \
                      "Рассчитан на локальный сервер (LM Studio, Ollama) или любой " \
                      "OpenAI-совместимый эндпоинт."
-  spec.homepage = "https://github.com/s-golovko/mini_agent"
+  spec.homepage = "https://github.com/GolovkoStepan/mini_agent"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.1.0"
+  # 3.2 — нижняя граница dev-зависимостей (rbs, rdoc, erb, public_suffix);
+  # на 3.1 не встаёт bundle, поэтому и обещать её нельзя.
+  spec.required_ruby_version = ">= 3.2.0"
 
   spec.metadata["allowed_push_host"] = "https://rubygems.org"
 
