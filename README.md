@@ -19,6 +19,27 @@ gem build mini_agent.gemspec
 gem install ./mini_agent-0.2.0.gem
 ```
 
+### Адрес LLM-сервера
+
+По умолчанию агент обращается к хосту `llm-server` на порту 1234. Если сервер
+стоит на отдельной машине, пропишите её адрес в `/etc/hosts`:
+
+```
+192.168.1.10	llm-server
+```
+
+Если сервер запущен на той же машине — укажите петлевой адрес:
+
+```
+127.0.0.1	llm-server
+```
+
+Имя выбрано односоставным намеренно: зону `.local` на macOS перехватывает
+mDNSResponder, и записи в `/etc/hosts` там срабатывают ненадёжно.
+
+Правку `/etc/hosts` можно не делать — тогда задавайте адрес явно через
+`--base-url` или `LLM_BASE_URL` (см. ниже).
+
 ## Использование
 
 ```bash
@@ -58,7 +79,7 @@ bundle exec ruby -Ilib exe/mini_agent "задача"
 Приоритет: опции CLI → переменные окружения → значения по умолчанию.
 
 ```bash
-export LLM_BASE_URL=http://localhost:1234/v1
+export LLM_BASE_URL=http://llm-server:1234/v1
 export LLM_MODEL=qwen3-coder
 mini_agent "покажи структуру проекта"
 ```

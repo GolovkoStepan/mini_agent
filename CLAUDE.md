@@ -31,6 +31,8 @@ make build                     # сборка гема
 
 Настройки читаются в порядке: **опции CLI → переменные окружения → значения по умолчанию** (`Config::DEFAULTS`). Переменные: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `MAX_TURNS`, `RETRY_COUNT`, `RETRY_DELAY`, `MAX_TOKENS`, `ALLOW_UNSAFE`, `COMMAND_TIMEOUT`.
 
+Адрес LLM по умолчанию — `http://llm-server:1234/v1`. Имя `llm-server` должно быть прописано в `/etc/hosts` (см. README): сервер обычно стоит на отдельной машине, и жёсткий IP в репозитории быстро устаревает. Для живых проверок сначала убедитесь, что имя резолвится: `curl http://llm-server:1234/v1/models`.
+
 ## Архитектура
 
 Поток управления: `exe/mini_agent` → `CLI` (разбор опций, сборка объектов) → `Agent#run` (цикл ходов) → `LLMClient#chat` ↔ `ToolRegistry#dispatch` → `Tools::Bash` → `CommandGuard` + `ProcessRunner`.
