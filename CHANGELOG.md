@@ -2,11 +2,11 @@
 
 ### Добавлено
 
-- GitHub Actions: тесты, линтер и `rbs validate` на Ruby 3.2, 3.3 и 3.4 при пуше и PR в `master`. Шаги вызывают цели `Makefile`, чтобы CI проверял ровно то же, что разработчик локально.
+- GitHub Actions: тесты, линтер и `rbs validate` на Ruby 3.3 и 3.4 при пуше и PR в `master`. Шаги вызывают цели `Makefile`, чтобы CI проверял ровно то же, что разработчик локально.
 
 ### Изменено
 
-- Минимальная версия Ruby поднята с 3.1 до 3.2 (`required_ruby_version`, `TargetRubyVersion`). На 3.1 не встают dev-зависимости из `Gemfile.lock` (`rbs`, `rdoc`, `erb`, `public_suffix` требуют 3.2+), так что заявленная поддержка 3.1 была нерабочей.
+- Минимальная версия Ruby поднята с 3.1 до 3.3 (`required_ruby_version`, `TargetRubyVersion`). Заявленная поддержка 3.1 была нерабочей: dev-зависимости из `Gemfile.lock` не встают ниже 3.3 (`parallel 2.1.0` тянется через `rubocop`, плюс `rbs`, `rdoc`, `erb`, `public_suffix`), и `bundle install` падал до запуска тестов.
 - В `Gemfile.lock` добавлена платформа `x86_64-linux` — без неё `bundle install` в CI падает на отсутствующей платформе.
 
 ### Исправлено
