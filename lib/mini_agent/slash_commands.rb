@@ -25,13 +25,18 @@ module MiniAgent
       "clear" => Messages::CMD_CLEAR,
       "model" => Messages::CMD_MODEL,
       "tools" => Messages::CMD_TOOLS,
+      "usage" => Messages::CMD_USAGE,
       "exit" => Messages::CMD_EXIT
     }.freeze
 
-    def initialize(config:, tools:, ui:)
+    # usage приходит извне (от Agent), а не заводится здесь: счётчик живёт
+    # всю сессию, а команды пересоздаются вместе с Repl. По умолчанию пустой,
+    # чтобы класс оставался самостоятельным в тестах.
+    def initialize(config:, tools:, ui:, usage: Usage.new)
       @config = config
       @tools = tools
       @ui = ui
+      @usage = usage
     end
 
     # Возвращает, что делать вызывающему: :task — отдать модели,
@@ -55,6 +60,7 @@ module MiniAgent
       when "clear" then :clear
       when "model" then model
       when "tools" then tools
+      when "usage" then usage
       when "exit", "quit" then :exit
       else unknown(name)
       end
@@ -81,6 +87,24 @@ module MiniAgent
     def tools
       @ui.puts(Messages::CMD_TOOLS_HEADER)
       @tools.names.each { |name| @ui.puts(format(Messages::CMD_TOOL_LINE, name: name)) }
+      :handled
+    end
+
+    # Нули до первого запроса выглядят как «модель ничего не потратила», хотя
+    # на деле её ещё не спрашивали, — поэтому пустой счётчик говорит об этом
+    # прямо, а не печатает три нуля.
+    def usage
+      return empty_usage if @usage.empty?
+
+      @ui.puts(Messages::CMD_USAGE_HEADER)
+      @ui.puts(format(Messages::CMD_USAGE_SENT, count: @usage.sent))
+      @ui.puts(format(Messages::CMD_USAGE_GENERATED, count: @usage.generated))
+      @ui.puts(format(Messages::CMD_USAGE_CONTEXT, count: @usage.context, requests: @usage.requests))
+      :handled
+    end
+
+    def empty_usage
+      @ui.puts(Messages::CMD_USAGE_EMPTY)
       :handled
     end
 

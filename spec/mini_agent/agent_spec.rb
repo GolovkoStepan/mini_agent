@@ -296,4 +296,53 @@ RSpec.describe MiniAgent::Agent do
       expect(result.to_a.map { |m| m[:role] }).to eq(%w[system user assistant user assistant])
     end
   end
+
+  describe "учёт токенов" do
+    def tokens(prompt, completion)
+      { "prompt_tokens" => prompt, "completion_tokens" => completion }
+    end
+
+    it "копит расход по ходам" do
+      allow(client).to receive(:chat).and_return(["ответ", [], tokens(13, 5)])
+
+      agent.run("задача")
+
+      expect(agent.usage.to_h).to include(sent: 13, generated: 5, requests: 1)
+    end
+
+    # Промпт растёт от хода к ходу — история уходит целиком заново. Складывать
+    # его нельзя: осмысленно последнее значение, текущий размер контекста.
+    it "берёт контекст из последнего запроса, а не из суммы" do
+      call = { "id" => "call_1", "function" => { "name" => "echo", "arguments" => "{}" } }
+      allow(client).to receive(:chat).and_return(
+        ["", [call], tokens(13, 5)],
+        ["готово", [], tokens(57, 7)]
+      )
+
+      agent.run("задача")
+
+      expect(agent.usage.context).to eq(57)
+      expect(agent.usage.generated).to eq(12)
+    end
+
+    # Токены провалившегося хода уже уплачены серверу: откат снимает сообщения,
+    # но не расход — иначе счётчик показывал бы не то, что было на самом деле.
+    it "не сбрасывает расход при откате неудачного хода" do
+      responses = [-> { ["ответ", [], tokens(13, 5)] }, -> { raise MiniAgent::LLMError, "сбой" }]
+      allow(client).to receive(:chat) { responses.shift.call }
+      history = agent.new_conversation
+
+      agent.run("первая", conversation: history)
+      agent.run("вторая", conversation: history)
+
+      expect(agent.usage.to_h).to include(sent: 13, generated: 5, requests: 1)
+    end
+
+    it "переживает ответ без usage" do
+      allow(client).to receive(:chat).and_return(["ответ", []])
+
+      expect { agent.run("задача") }.not_to raise_error
+      expect(agent.usage).to be_empty
+    end
+  end
 end

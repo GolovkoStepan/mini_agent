@@ -10,10 +10,12 @@ RSpec.describe MiniAgent::LLMClient do
 
   subject(:client) { described_class.new(config: config) }
 
-  def chat_response(content: "готово", tool_calls: nil)
+  def chat_response(content: "готово", tool_calls: nil, usage: nil)
     message = { "role" => "assistant", "content" => content }
     message["tool_calls"] = tool_calls if tool_calls
-    { "choices" => [{ "message" => message }] }.to_json
+    body = { "choices" => [{ "message" => message }] }
+    body["usage"] = usage if usage
+    body.to_json
   end
 
   let(:messages) { [{ role: "user", content: "привет" }] }
@@ -26,6 +28,28 @@ RSpec.describe MiniAgent::LLMClient do
 
       expect(content).to eq("готово")
       expect(tool_calls).to eq([])
+    end
+
+    # Расход токенов сервер кладёт рядом с choices, а не внутрь сообщения.
+    # Клиент отдаёт его как есть: считать — забота Usage.
+    it "отдаёт usage третьим элементом" do
+      tokens = { "prompt_tokens" => 13, "completion_tokens" => 5, "total_tokens" => 18 }
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response(usage: tokens))
+
+      _content, _tool_calls, usage = client.chat(messages)
+
+      expect(usage).to include("prompt_tokens" => 13, "completion_tokens" => 5)
+    end
+
+    # Спецификация usage не требует: ответ без него — обычное дело,
+    # а не повод для ошибки.
+    it "не ломается, когда сервер не прислал usage" do
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response)
+
+      content, _tool_calls, usage = client.chat(messages)
+
+      expect(content).to eq("готово")
+      expect(usage).to be_nil
     end
 
     it "возвращает вызовы инструментов" do

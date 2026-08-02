@@ -73,6 +73,18 @@ module MiniAgent
     def filename: () -> String?
   end
 
+  class Usage
+    attr_reader sent: Integer
+    attr_reader generated: Integer
+    attr_reader context: Integer
+    attr_reader requests: Integer
+
+    def initialize: () -> void
+    def add: (json_object? usage) -> self
+    def empty?: () -> bool
+    def to_h: () -> Hash[Symbol, Integer]
+  end
+
   class Transcript
     def initialize: (String path, ?ui: UI?, ?clock: untyped) -> void
     def path: () -> String
@@ -94,7 +106,7 @@ module MiniAgent
     def initialize: (?system_prompt: String?, ?project_context: String?, ?transcript: Transcript?) -> void
     def system: (String content) -> message
     def user: (String content) -> message
-    def assistant: (String? content, ?tool_calls: Array[tool_call]?) -> message
+    def assistant: (String? content, ?tool_calls: Array[tool_call]?, ?usage: json_object?) -> message
     def tool: (String tool_call_id, String content) -> message
     def to_a: () -> Array[message]
     def last: () -> message?
@@ -211,7 +223,7 @@ module MiniAgent
 
     def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped) -> void
     def start: [T] () { (LLMClient) -> T } -> T
-    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call]]
+    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call], json_object?]
     def models: () -> Array[String]
   end
 
@@ -222,6 +234,7 @@ module MiniAgent
     def new_conversation: () -> Conversation
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def failed?: () -> bool
+    def usage: () -> Usage
   end
 
   class AgentBuilder
@@ -240,7 +253,7 @@ module MiniAgent
     BARE_EXIT: Array[String]
     COMMANDS: Hash[String, String]
 
-    def initialize: (config: Config, tools: ToolRegistry, ui: UI) -> void
+    def initialize: (config: Config, tools: ToolRegistry, ui: UI, ?usage: Usage) -> void
     def call: (String? line) -> (:task | :handled | :clear | :exit)
   end
 

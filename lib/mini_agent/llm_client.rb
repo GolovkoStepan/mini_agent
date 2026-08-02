@@ -36,7 +36,11 @@ module MiniAgent
       @http = nil
     end
 
-    # Возвращает [content, tool_calls].
+    # Возвращает [content, tool_calls, usage].
+    #
+    # usage — сырой хеш из ответа (`prompt_tokens`, `completion_tokens`) либо
+    # nil: спецификация его не требует, и не всякий сервер присылает. Здесь он
+    # не разбирается — учётом занимается Usage, клиенту это чужая забота.
     #
     # tool_choice: "none" нужен для финального суммирующего запроса — иначе
     # модель может вернуть очередной вызов инструмента, который уже некуда
@@ -115,7 +119,7 @@ module MiniAgent
       message = extract_message(data)
       return nil unless message
 
-      [(message["content"] || "").strip, message["tool_calls"] || []]
+      [(message["content"] || "").strip, message["tool_calls"] || [], data["usage"]]
     rescue JSON::ParserError => e
       @ui&.error(format(Messages::INVALID_JSON, message: e.message))
       @last_reason = format(Messages::INVALID_JSON, message: e.message)

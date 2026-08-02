@@ -16,7 +16,12 @@ module MiniAgent
       @tools = tools
       @ui = ui
       @history = history
+      @usage = Usage.new
     end
+
+    # Расход токенов за сессию: живёт у агента, а не у клиента, потому что
+    # соединение может подниматься заново, а счёт идёт по всей работе.
+    attr_reader :usage
 
     # Пустая история со всем, что агенту для неё нужно. Repl зовёт этот же
     # метод по /clear: команда начинает диалог заново, и без общей точки
@@ -53,22 +58,29 @@ module MiniAgent
         # в логе работы эта бухгалтерия не нужна.
         @ui.status = format(Messages::TURN, number: index + 1, total: @config.max_turns)
 
-        content, tool_calls = request(conversation)
+        content, tool_calls, usage = request(conversation)
         return recover(conversation, mark) if content.nil?
 
         @ui.assistant(content) unless content.empty?
 
-        return finish(conversation, content) if tool_calls.empty?
+        return finish(conversation, content, usage) if tool_calls.empty?
 
-        conversation.assistant(content, tool_calls: tool_calls)
+        conversation.assistant(content, tool_calls: tool_calls, usage: usage)
         tool_calls.each { |tool_call| handle_tool_call(conversation, tool_call) }
       end
 
       summarize(conversation, mark)
     end
 
+    # Учёт токенов стоит здесь, а не в цикле ходов: через этот метод проходят
+    # оба вида запросов — и обычный ход, и суммирующий из summarize, — а тот
+    # оплачен ровно так же.
     def request(conversation, tool_choice: "auto")
-      @client.chat(conversation.to_a, tools: @tools.schemas, tool_choice: tool_choice)
+      content, tool_calls, usage = @client.chat(
+        conversation.to_a, tools: @tools.schemas, tool_choice: tool_choice
+      )
+      @usage.add(usage)
+      [content, tool_calls, usage]
     rescue StandardError => e
       @failed = true
       @ui.error(format(Messages::LLM_CONNECTION_FAILED, message: e.message))
@@ -102,11 +114,11 @@ module MiniAgent
 
     # Отдельного «готово» не печатаем: финальный ответ модели уже показан
     # выше и сам по себе означает завершение.
-    def finish(conversation, content)
+    def finish(conversation, content, usage = nil)
       if content.empty?
         @ui.warn(Messages::EMPTY_RESPONSE)
       else
-        conversation.assistant(content)
+        conversation.assistant(content, usage: usage)
       end
       conversation
     end

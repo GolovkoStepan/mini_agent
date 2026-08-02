@@ -167,6 +167,7 @@ module MiniAgent
     CMD_CLEAR = "начать историю заново"
     CMD_MODEL = "какая модель, сервер и каталог используются"
     CMD_TOOLS = "доступные модели инструменты"
+    CMD_USAGE = "расход токенов за сессию"
     CMD_EXIT = "выход"
     CMD_HELP_HEADER = "Команды:"
     CMD_HELP_LINE = "  /%<name>-6s %<summary>s"
@@ -175,6 +176,13 @@ module MiniAgent
     CMD_CWD_LINE = "Каталог: %<path>s"
     CMD_TOOLS_HEADER = "Инструменты:"
     CMD_TOOL_LINE = "  %<name>s"
+    CMD_USAGE_HEADER = "Токены за сессию:"
+    # «Отправлено» — сумма промптов со всех запросов, а не размер диалога:
+    # история уходит модели заново на каждом ходу. Размер диалога — «контекст».
+    CMD_USAGE_SENT = "  отправлено:  %<count>d"
+    CMD_USAGE_GENERATED = "  сгенерировано: %<count>d"
+    CMD_USAGE_CONTEXT = "  контекст сейчас: %<count>d (запросов: %<requests>d)"
+    CMD_USAGE_EMPTY = "Запросов к модели ещё не было."
     CMD_CLEARED = "История очищена."
     CMD_UNKNOWN = "Неизвестная команда: /%<name>s. /help — список."
     # Ctrl+C прерывает задачу, а не сессию: история цела, можно продолжать.

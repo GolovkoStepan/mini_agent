@@ -75,6 +75,29 @@ RSpec.describe MiniAgent::SlashCommands do
     end
   end
 
+  describe "/usage" do
+    let(:usage) { MiniAgent::Usage.new }
+
+    subject(:commands) { described_class.new(config: config, tools: tools, ui: ui, usage: usage) }
+
+    it "показывает отправленное, сгенерированное и текущий контекст" do
+      usage.add({ "prompt_tokens" => 13, "completion_tokens" => 5 })
+      usage.add({ "prompt_tokens" => 57, "completion_tokens" => 7 })
+
+      expect(commands.call("/usage")).to eq(:handled)
+      expect(out.string).to include("70", "12", "57")
+    end
+
+    # Три нуля читаются как «модель ничего не потратила», хотя её ещё
+    # не спрашивали. Это разные вещи, и говорить надо прямо.
+    it "до первого запроса говорит, что считать нечего" do
+      expect(commands.call("/usage")).to eq(:handled)
+
+      expect(out.string).to include("не было")
+      expect(out.string).not_to include("0")
+    end
+  end
+
   describe "/clear" do
     it "просит очистить историю" do
       expect(commands.call("/clear")).to eq(:clear)

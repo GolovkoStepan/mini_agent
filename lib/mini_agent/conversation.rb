@@ -25,23 +25,27 @@ module MiniAgent
     end
 
     def system(content)
-      push(role: "system", content: content)
+      push({ role: "system", content: content })
     end
 
     def user(content)
-      push(role: "user", content: content)
+      push({ role: "user", content: content })
     end
 
     # content намеренно может быть nil: когда модель возвращает только
     # tool_calls без текста, спецификация API требует именно null, а не "".
-    def assistant(content, tool_calls: nil)
+    #
+    # usage уходит только в журнал и НЕ попадает в сообщение: история целиком
+    # отправляется модели через to_a, и лишнее поле поехало бы вместе с ней.
+    # В логе же оно на месте — по нему видно, на каком ходу раздулся контекст.
+    def assistant(content, tool_calls: nil, usage: nil)
       message = { role: "assistant", content: normalize_content(content) }
       message[:tool_calls] = tool_calls if tool_calls && !tool_calls.empty?
-      push(message)
+      push(message, usage: usage)
     end
 
     def tool(tool_call_id, content)
-      push(role: "tool", tool_call_id: tool_call_id, content: content)
+      push({ role: "tool", tool_call_id: tool_call_id, content: content })
     end
 
     def to_a
@@ -107,9 +111,11 @@ module MiniAgent
       "#{system_prompt}#{block}"
     end
 
-    def push(message)
+    # В историю кладётся само сообщение, а в журнал — оно же плюс расход
+    # токенов: в @messages ему нельзя, иначе уедет модели вместе с историей.
+    def push(message, usage: nil)
       @messages << message
-      @transcript&.message(message)
+      @transcript&.message(usage ? message.merge(usage: usage) : message)
       message
     end
 

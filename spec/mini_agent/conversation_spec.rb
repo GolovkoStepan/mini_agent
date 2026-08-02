@@ -138,6 +138,26 @@ RSpec.describe MiniAgent::Conversation do
       expect { described_class.new(system_prompt: nil).user("задача") }.not_to raise_error
     end
 
+    # История целиком уходит модели через to_a, поэтому расход токенов
+    # в сообщение класть нельзя — он поехал бы вместе с ней. В журнале же
+    # он нужен: по нему видно, на каком ходу раздулся контекст.
+    it "пишет расход токенов в журнал, но не в историю" do
+      conversation = described_class.new(system_prompt: nil, transcript: transcript)
+
+      conversation.assistant("ответ", usage: { "prompt_tokens" => 13 })
+
+      expect(transcript).to have_received(:message).with(hash_including(usage: { "prompt_tokens" => 13 }))
+      expect(conversation.to_a.last).not_to have_key(:usage)
+    end
+
+    it "без расхода запись не меняется" do
+      conversation = described_class.new(system_prompt: nil, transcript: transcript)
+
+      conversation.assistant("ответ")
+
+      expect(transcript).to have_received(:message).with(hash_excluding(:usage))
+    end
+
     # Журнал протоколирует то, что уходило модели, поэтому снятые сообщения
     # из него не вычёркиваются — вместо этого появляется отметка об откате.
     it "сообщает журналу об откате, а не переписывает его" do
@@ -189,5 +209,19 @@ RSpec.describe MiniAgent::Conversation do
     conversation.to_a.first[:content] = "подмена"
 
     expect(conversation.last[:content]).to eq("s")
+  end
+
+  # Сообщения складываются хешем, а у push появился keyword-аргумент usage:.
+  # Ruby разбирает `push(role: ..., content: ...)` без фигурных скобок как
+  # keyword-аргументы, и сообщение уходило пустым — поймано только тем, что
+  # упали все тесты Repl разом. Тест закрепляет, что роли на месте.
+  it "кладёт сообщения всех ролей целиком, а не пустыми" do
+    conversation = described_class.new(system_prompt: "правила")
+    conversation.user("задача")
+    conversation.assistant("ответ")
+    conversation.tool("call_1", "вывод")
+
+    expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user assistant tool])
+    expect(conversation.to_a.map { |m| m[:content] }).to eq(%w[правила задача ответ вывод])
   end
 end

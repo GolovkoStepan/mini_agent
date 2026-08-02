@@ -13,7 +13,7 @@ module MiniAgent
       @config = config
       @ui = ui
       @reader = reader || LineReader.new
-      @commands = SlashCommands.new(config: config, tools: tools, ui: ui)
+      @commands = SlashCommands.new(config: config, tools: tools, ui: ui, usage: agent.usage)
     end
 
     # Возвращает историю: последняя Conversation остаётся доступной вызвавшему
