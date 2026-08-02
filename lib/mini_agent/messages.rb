@@ -112,6 +112,7 @@ module MiniAgent
     OPT_ALLOW_UNSAFE = "Разрешить опасные команды без подтверждения"
     OPT_BASE_URL = "Базовый URL LLM-сервера"
     OPT_MODEL = "Имя модели"
+    OPT_LIST_MODELS = "Показать модели, загруженные на сервере"
     OPT_HELP = "Показать справку"
     OPT_VERSION = "Показать версию"
     INTERACTIVE_HEADER = "Mini Agent (интерактивный режим)"
@@ -119,6 +120,14 @@ module MiniAgent
     PROMPT_SIGN = "> "
     GOODBYE = "До свидания!"
     INTERRUPTED = "\nВыход по Ctrl+C"
+    # --- Список моделей ---
+    MODELS_HEADER = "Модели на %<url>s:"
+    # Звёздочка помечает выбранную модель: ради этого сравнения команду
+    # обычно и запускают.
+    MODEL_SELECTED = "  * %<name>s"
+    MODEL_PLAIN = "    %<name>s"
+    NO_MODELS = "На %<url>s не загружено ни одной модели."
+
     NO_TASK_HEADER = "Mini Agent v%<version>s"
     NO_TASK_HINT = "Не указана задача. Используйте -i для интерактивного режима"
     NO_TASK_HINT2 = "или передайте задачу как аргумент: mini_agent <задача>"

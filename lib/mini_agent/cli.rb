@@ -29,6 +29,7 @@ module MiniAgent
       [:base_url, "--base-url URL", Messages::OPT_BASE_URL],
       [:model, "--model NAME", Messages::OPT_MODEL],
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
+      [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
       [:help, "-h", "--help", Messages::OPT_HELP],
       [:version, "-v", "--version", Messages::OPT_VERSION]
     ].freeze
@@ -66,6 +67,7 @@ module MiniAgent
       config = Config.new(options)
       ui = UI.new(out: @out)
 
+      return list_models(config, ui) if options[:list_models]
       return with_connection(config, ui) { |agent| agent.interactive(input: @input) } if options[:interactive]
 
       task = args.join(" ").strip
@@ -74,11 +76,17 @@ module MiniAgent
       with_connection(config, ui) { |agent| agent.run(task) }
     end
 
+    def with_connection(config, ui, &)
+      connecting(config, ui) do
+        with_agent(config, ui, &)
+        EXIT_OK
+      end
+    end
+
     # Соединение не открылось — показываем адрес и как его сменить вместо
     # сырого бэктрейса Net::HTTP.
-    def with_connection(config, ui, &)
-      with_agent(config, ui, &)
-      EXIT_OK
+    def connecting(config, ui)
+      yield
     rescue *CONNECT_ERRORS => e
       ui.error(format(Messages::CONNECT_FAILED, url: config.base_url))
       ui.puts(format(Messages::CONNECT_REASON, message: e.message))
@@ -88,6 +96,38 @@ module MiniAgent
       ui.error(format(Messages::INVALID_URL, url: config.base_url))
       ui.puts(Messages::INVALID_URL_HINT)
       EXIT_CONNECT
+    end
+
+    # Справка о том, что реально загружено на сервере. Нужна потому, что
+    # умолчание Config::DEFAULTS[:model] совпадает с загруженной моделью
+    # далеко не всегда, а LM Studio на незнакомое имя не отвечает ошибкой —
+    # он молча подставляет свою, и подмену нечем заметить.
+    def list_models(config, ui)
+      connecting(config, ui) do
+        client = LLMClient.new(config: config, ui: ui)
+        names = client.start(&:models)
+
+        return report_no_models(config, ui) if names.empty?
+
+        ui.puts(format(Messages::MODELS_HEADER, url: config.base_url))
+        names.each { |name| ui.puts(model_line(name, config.model)) }
+        EXIT_OK
+      end
+    rescue LLMError => e
+      ui.error(e.message)
+      EXIT_CONNECT
+    end
+
+    # Текущая модель помечается, чтобы было видно, совпадает ли она с
+    # загруженной: именно это и выясняют этой командой.
+    def model_line(name, selected)
+      marker = name == selected ? Messages::MODEL_SELECTED : Messages::MODEL_PLAIN
+      format(marker, name: name)
+    end
+
+    def report_no_models(config, ui)
+      ui.warn(format(Messages::NO_MODELS, url: config.base_url))
+      EXIT_OK
     end
 
     # Соединение с LLM живёт ровно столько, сколько работает агент.

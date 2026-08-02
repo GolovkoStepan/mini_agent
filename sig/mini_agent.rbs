@@ -54,6 +54,7 @@ module MiniAgent
     def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
     def allow_unsafe?: () -> bool
     def chat_uri: () -> URI::Generic
+    def models_uri: () -> URI::Generic
     def use_ssl?: () -> bool
   end
 
@@ -160,6 +161,13 @@ module MiniAgent
     def to_s: () -> String
   end
 
+  class ModelsRequest
+    INVALID_DATA: String
+
+    def initialize: (config: Config, http: untyped) -> void
+    def call: () -> Array[String]
+  end
+
   class LLMClient
     RETRIABLE: Array[Class]
     OPEN_TIMEOUT: Integer
@@ -168,6 +176,7 @@ module MiniAgent
     def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped) -> void
     def start: [T] () { (LLMClient) -> T } -> T
     def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call]]
+    def models: () -> Array[String]
   end
 
   class Agent

@@ -64,6 +64,12 @@ module MiniAgent
       raise LLMError, format(Messages::LLM_FAILED, count: @config.retry_count, error: last_error)
     end
 
+    # Список моделей, загруженных на сервере: массив имён. Сам запрос живёт
+    # в ModelsRequest — это справочная команда без повторов, а не диалог.
+    def models
+      ModelsRequest.new(config: @config, http: connection).call
+    end
+
     private
 
     # Запрос создаётся заново на каждой попытке: переиспользовать один объект

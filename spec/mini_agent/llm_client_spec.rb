@@ -278,6 +278,68 @@ RSpec.describe MiniAgent::LLMClient do
     end
   end
 
+  describe "#models" do
+    let(:models_endpoint) { "#{base_url}/models" }
+
+    it "возвращает отсортированные имена моделей" do
+      body = { "data" => [{ "id" => "qwen" }, { "id" => "deepseek" }] }.to_json
+      stub_request(:get, models_endpoint).to_return(status: 200, body: body)
+
+      expect(client.models).to eq(%w[deepseek qwen])
+    end
+
+    it "возвращает пустой список, когда моделей нет" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: { "data" => [] }.to_json)
+
+      expect(client.models).to eq([])
+    end
+
+    it "пропускает записи без id" do
+      body = { "data" => [{ "id" => "qwen" }, { "object" => "model" }] }.to_json
+      stub_request(:get, models_endpoint).to_return(status: 200, body: body)
+
+      expect(client.models).to eq(["qwen"])
+    end
+
+    it "передаёт авторизацию" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: { "data" => [] }.to_json)
+
+      client.models
+
+      expect(a_request(:get, models_endpoint).with(headers: { "Authorization" => "Bearer secret" }))
+        .to have_been_made
+    end
+
+    # Разовая справочная команда: человек смотрит в терминал, и молча ждать
+    # несколько секунд перед показом ошибки хуже, чем показать её сразу.
+    it "не повторяет запрос при ошибке" do
+      stub_request(:get, models_endpoint).to_return(status: 500, body: "boom")
+
+      expect { client.models }.to raise_error(MiniAgent::LLMError, /500/)
+      expect(a_request(:get, models_endpoint)).to have_been_made.once
+    end
+
+    it "бросает LLMError на некорректном JSON" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: "не json")
+
+      expect { client.models }.to raise_error(MiniAgent::LLMError, /JSON/)
+    end
+
+    it "бросает LLMError, когда поле data не список" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: { "data" => "qwen" }.to_json)
+
+      expect { client.models }.to raise_error(MiniAgent::LLMError, /data/)
+    end
+
+    # LM Studio на неверный путь отвечает 200 с полем error в теле.
+    it "показывает ошибку из тела, пришедшую с кодом 200" do
+      body = { "error" => "Unexpected endpoint or method." }.to_json
+      stub_request(:get, models_endpoint).to_return(status: 200, body: body)
+
+      expect { client.models }.to raise_error(MiniAgent::LLMError, /Unexpected endpoint/)
+    end
+  end
+
   describe "#start" do
     it "выполняет блок и закрывает соединение" do
       stub_request(:post, endpoint).to_return(status: 200, body: chat_response)

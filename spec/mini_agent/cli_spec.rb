@@ -98,6 +98,93 @@ RSpec.describe MiniAgent::CLI do
   # Соединение открывается в LLMClient#start, до первого запроса, поэтому
   # webmock здесь не подходит: он перехватывает запросы, а не установку
   # соединения. Подменяем сам start.
+  describe "--list-models" do
+    let(:models_endpoint) { "http://cli.test/v1/models" }
+
+    def models_response(*names)
+      { "data" => names.map { |name| { "id" => name, "object" => "model" } } }.to_json
+    end
+
+    def list_models(*extra)
+      start(["--list-models", "--base-url", "http://cli.test/v1", *extra])
+    end
+
+    it "печатает загруженные модели" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: models_response("qwen", "deepseek"))
+
+      expect(list_models).to eq(0)
+      expect(out.string).to include("qwen")
+      expect(out.string).to include("deepseek")
+    end
+
+    it "показывает адрес сервера в заголовке" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: models_response("qwen"))
+
+      list_models
+
+      expect(out.string).to include("Модели на http://cli.test/v1:")
+    end
+
+    # Ради этого сравнения команду и запускают: умолчание модели совпадает
+    # с загруженной далеко не всегда.
+    it "помечает выбранную модель звёздочкой" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: models_response("qwen", "deepseek"))
+
+      list_models("--model", "deepseek")
+
+      expect(out.string).to include("  * deepseek")
+      expect(out.string).to include("    qwen")
+    end
+
+    it "сортирует имена" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: models_response("яблоко", "deepseek", "qwen"))
+
+      list_models
+
+      expect(out.string.lines.map(&:strip).reject(&:empty?).drop(1)).to eq(%w[deepseek qwen яблоко])
+    end
+
+    it "сообщает о пустом списке вместо голого заголовка" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: { "data" => [] }.to_json)
+
+      expect(list_models).to eq(0)
+      expect(out.string).to include("не загружено ни одной модели")
+    end
+
+    it "не запускает агента" do
+      stub_request(:get, models_endpoint).to_return(status: 200, body: models_response("qwen"))
+
+      list_models
+
+      expect(a_request(:post, "http://cli.test/v1/chat/completions")).not_to have_been_made
+    end
+
+    it "сообщает об ошибке сервера с кодом 2" do
+      stub_request(:get, models_endpoint).to_return(status: 500, body: "boom")
+
+      expect(list_models).to eq(2)
+      expect(out.string).to include("500")
+    end
+
+    # LM Studio отвечает 200 с полем error в теле, когда путь не тот
+    # (например, base_url без /v1). Сообщение «поле data отсутствует»
+    # формально верно и совершенно бесполезно.
+    it "показывает причину, когда сервер вернул ошибку в теле с кодом 200" do
+      body = { "error" => "Unexpected endpoint or method. (GET /nope/models)" }.to_json
+      stub_request(:get, models_endpoint).to_return(status: 200, body: body)
+
+      expect(list_models).to eq(2)
+      expect(out.string).to include("Unexpected endpoint")
+    end
+
+    it "сообщает о недоступном сервере вместо бэктрейса" do
+      stub_request(:get, models_endpoint).to_raise(Errno::ECONNREFUSED)
+
+      expect(list_models).to eq(2)
+      expect(out.string).to include("Не удалось подключиться")
+    end
+  end
+
   describe "недоступный LLM" do
     def fail_connection_with(error)
       allow_any_instance_of(MiniAgent::LLMClient).to receive(:start).and_raise(error)

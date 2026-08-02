@@ -65,6 +65,10 @@ module MiniAgent
       URI.parse("#{@base_url}/chat/completions")
     end
 
+    def models_uri
+      URI.parse("#{@base_url}/models")
+    end
+
     def use_ssl?
       chat_uri.scheme == "https"
     end
