@@ -9,9 +9,14 @@ module MiniAgent
   # складывались с символьными ключами, а пришедшие от модели tool_calls —
   # со строковыми, и по массиву приходилось ходить с оглядкой на источник.
   class Conversation
-    def initialize(system_prompt: Messages::SYSTEM_PROMPT)
+    # project_context — описание проекта (AGENTS.md и подобные). Дописывается
+    # к системному промпту, а не отдельным сообщением: шаблоны чата ряда
+    # моделей (Qwen и другие) требуют, чтобы system-сообщение было ровно одно
+    # и первое, и отвечают HTTP 400 на второе.
+    def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil)
       @messages = []
-      system(system_prompt) if system_prompt
+      prompt = build_prompt(system_prompt, project_context)
+      system(prompt) if prompt
     end
 
     def system(content)
@@ -60,6 +65,15 @@ module MiniAgent
     end
 
     private
+
+    # Контекст без промпта тоже осмыслен: --system-prompt отключён, а описание
+    # проекта модели всё равно нужно.
+    def build_prompt(system_prompt, project_context)
+      return system_prompt if project_context.nil? || project_context.strip.empty?
+
+      block = format(Messages::PROJECT_CONTEXT, content: project_context.strip)
+      "#{system_prompt}#{block}"
+    end
 
     def push(message)
       @messages << message

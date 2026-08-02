@@ -11,6 +11,45 @@ RSpec.describe MiniAgent::Conversation do
     expect(described_class.new(system_prompt: nil)).to be_empty
   end
 
+  describe "контекст проекта" do
+    # Шаблоны чата ряда моделей требуют, чтобы system-сообщение было ровно
+    # одно и первое, и отвечают HTTP 400 на второе.
+    it "дописывает контекст к системному промпту, а не отдельным сообщением" do
+      conversation = described_class.new(system_prompt: "правила", project_context: "make spec")
+
+      expect(conversation.size).to eq(1)
+      expect(conversation.last[:content]).to include("правила")
+      expect(conversation.last[:content]).to include("make spec")
+    end
+
+    # Без явной границы модель принимает описание за инструкции и начинает
+    # выполнять то, что в нём написано, вместо задачи пользователя.
+    it "размечает контекст блоком" do
+      conversation = described_class.new(system_prompt: "правила", project_context: "make spec")
+
+      expect(conversation.last[:content]).to include("<project_context>")
+      expect(conversation.last[:content]).to include("</project_context>")
+    end
+
+    it "не меняет промпт, когда контекста нет" do
+      conversation = described_class.new(system_prompt: "правила", project_context: nil)
+
+      expect(conversation.last[:content]).to eq("правила")
+    end
+
+    it "не меняет промпт, когда контекст пуст" do
+      conversation = described_class.new(system_prompt: "правила", project_context: "  \n ")
+
+      expect(conversation.last[:content]).to eq("правила")
+    end
+
+    it "принимает контекст без системного промпта" do
+      conversation = described_class.new(system_prompt: nil, project_context: "make spec")
+
+      expect(conversation.last[:content]).to include("make spec")
+    end
+  end
+
   it "сохраняет порядок сообщений" do
     conversation = described_class.new(system_prompt: "s")
     conversation.user("привет")

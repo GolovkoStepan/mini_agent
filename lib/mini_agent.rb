@@ -5,6 +5,7 @@ require_relative "mini_agent/messages"
 require_relative "mini_agent/color"
 require_relative "mini_agent/config"
 require_relative "mini_agent/conversation"
+require_relative "mini_agent/project_context"
 
 module MiniAgent
   class Error < StandardError; end

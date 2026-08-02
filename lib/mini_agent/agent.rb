@@ -10,18 +10,19 @@ module MiniAgent
     # которое UI применяет для читаемости консоли (UI::PREVIEW_LINES).
     MAX_TOOL_OUTPUT = 10_000
 
-    def initialize(config:, client:, tools:, ui:)
+    def initialize(config:, client:, tools:, ui:, project_context: nil)
       @config = config
       @client = client
       @tools = tools
       @ui = ui
+      @project_context = project_context
     end
 
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
     # это позволяет интерактивному режиму продолжать диалог с накопленной
     # историей, передавая её обратно через conversation:.
     def run(user_message = nil, conversation: nil)
-      conversation ||= Conversation.new
+      conversation ||= Conversation.new(project_context: @project_context)
       conversation.user(user_message) if user_message
 
       @config.max_turns.times do |index|
@@ -47,7 +48,7 @@ module MiniAgent
     def interactive(input: $stdin)
       @ui.assistant(Messages::INTERACTIVE_HEADER)
       @ui.puts(Messages::INTERACTIVE_HINT)
-      conversation = Conversation.new
+      conversation = Conversation.new(project_context: @project_context)
 
       loop do
         @ui.print("\n#{Messages::PROMPT_SIGN}")

@@ -104,13 +104,13 @@ module MiniAgent
     # он молча подставляет свою, и подмену нечем заметить.
     def list_models(config, ui)
       connecting(config, ui) do
-        client = LLMClient.new(config: config, ui: ui)
-        names = client.start(&:models)
+        names = LLMClient.new(config: config, ui: ui).start(&:models)
 
-        return report_no_models(config, ui) if names.empty?
-
-        ui.puts(format(Messages::MODELS_HEADER, url: config.base_url))
-        names.each { |name| ui.puts(model_line(name, config.model)) }
+        if names.empty?
+          ui.warn(format(Messages::NO_MODELS, url: config.base_url))
+        else
+          ui.models(names, selected: config.model, url: config.base_url)
+        end
         EXIT_OK
       end
     rescue LLMError => e
@@ -118,26 +118,26 @@ module MiniAgent
       EXIT_CONNECT
     end
 
-    # Текущая модель помечается, чтобы было видно, совпадает ли она с
-    # загруженной: именно это и выясняют этой командой.
-    def model_line(name, selected)
-      marker = name == selected ? Messages::MODEL_SELECTED : Messages::MODEL_PLAIN
-      format(marker, name: name)
-    end
-
-    def report_no_models(config, ui)
-      ui.warn(format(Messages::NO_MODELS, url: config.base_url))
-      EXIT_OK
-    end
-
     # Соединение с LLM живёт ровно столько, сколько работает агент.
     def with_agent(config, ui)
       client = LLMClient.new(config: config, ui: ui)
       tools = build_tools(config, ui)
+      context = project_context(ui)
 
       client.start do |connected|
-        yield Agent.new(config: config, client: connected, tools: tools, ui: ui)
+        yield Agent.new(config: config, client: connected, tools: tools, ui: ui, project_context: context)
       end
+    end
+
+    # О подхваченном описании проекта сообщаем: молчаливое изменение поведения
+    # агента хуже лишней строки в выводе — иначе непонятно, откуда он вдруг
+    # знает про принятые в проекте команды.
+    def project_context(ui)
+      loader = ProjectContext.new
+      content = loader.load
+      ui.puts(format(Messages::CONTEXT_LOADED, name: loader.filename)) if content
+
+      content
     end
 
     def build_tools(config, ui)

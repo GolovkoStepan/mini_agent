@@ -58,8 +58,18 @@ module MiniAgent
     def use_ssl?: () -> bool
   end
 
+  class ProjectContext
+    FILENAMES: Array[String]
+    MAX_SIZE: Integer
+
+    def self.load: (?String dir) -> String?
+    def initialize: (?String dir) -> void
+    def load: () -> String?
+    def filename: () -> String?
+  end
+
   class Conversation
-    def initialize: (?system_prompt: String?) -> void
+    def initialize: (?system_prompt: String?, ?project_context: String?) -> void
     def system: (String content) -> message
     def user: (String content) -> message
     def assistant: (String? content, ?tool_calls: Array[tool_call]?) -> message
@@ -142,6 +152,7 @@ module MiniAgent
     def puts: (?untyped text) -> void
     def print: (untyped text) -> void
     def assistant: (String content) -> void
+    def models: (Array[String] names, selected: String, url: String) -> void
     def warn: (String text) -> void
     def error: (String text) -> void
     def tool_call: (String name, json_object arguments) -> void
@@ -182,7 +193,7 @@ module MiniAgent
   class Agent
     MAX_TOOL_OUTPUT: Integer
 
-    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI) -> void
+    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?project_context: String?) -> void
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def interactive: (?input: IO) -> Conversation
   end

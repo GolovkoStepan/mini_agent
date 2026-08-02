@@ -90,6 +90,16 @@ module MiniAgent
       print_ellipsis(lines.size - shown.size)
     end
 
+    # Список моделей сервера с пометкой выбранной: ради этого сравнения
+    # команду обычно и запускают.
+    def models(names, selected:, url:)
+      puts(format(Messages::MODELS_HEADER, url: url))
+      names.each do |name|
+        marker = name == selected ? Messages::MODEL_SELECTED : Messages::MODEL_PLAIN
+        puts(format(marker, name: name))
+      end
+    end
+
     # Вне TTY поток не создаётся вообще: в логах и в тестах анимация не нужна,
     # а лишний поток — источник недетерминированности.
     def with_spinner

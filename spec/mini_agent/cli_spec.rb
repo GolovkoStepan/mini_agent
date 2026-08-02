@@ -93,6 +93,41 @@ RSpec.describe MiniAgent::CLI do
                 .with { |req| JSON.parse(req.body)["tools"].first["function"]["name"] == "bash" }
       expect(matcher).to have_been_made
     end
+
+    describe "контекст проекта" do
+      it "подмешивает описание проекта в системный промпт" do
+        allow(MiniAgent::ProjectContext).to receive(:new).and_return(
+          instance_double(MiniAgent::ProjectContext, load: "Тесты: make spec", filename: "AGENTS.md")
+        )
+
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        matcher = a_request(:post, endpoint)
+                  .with { |req| JSON.parse(req.body)["messages"].first["content"].include?("Тесты: make spec") }
+        expect(matcher).to have_been_made
+      end
+
+      # Молчаливое изменение поведения агента хуже лишней строки в выводе.
+      it "сообщает, что контекст подхвачен" do
+        allow(MiniAgent::ProjectContext).to receive(:new).and_return(
+          instance_double(MiniAgent::ProjectContext, load: "описание", filename: "AGENTS.md")
+        )
+
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(out.string).to include("Контекст проекта: AGENTS.md")
+      end
+
+      it "молчит, когда описания нет" do
+        allow(MiniAgent::ProjectContext).to receive(:new).and_return(
+          instance_double(MiniAgent::ProjectContext, load: nil, filename: nil)
+        )
+
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(out.string).not_to include("Контекст проекта")
+      end
+    end
   end
 
   # Соединение открывается в LLMClient#start, до первого запроса, поэтому
