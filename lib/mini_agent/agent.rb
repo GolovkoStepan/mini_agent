@@ -10,6 +10,11 @@ module MiniAgent
     # которое UI применяет для читаемости консоли (UI::PREVIEW_LINES).
     MAX_TOOL_OUTPUT = 10_000
 
+    # Нужен Repl: команда /clear начинает историю заново, и описание проекта
+    # должно попасть в новую Conversation — иначе после очистки агент забывал бы
+    # про AGENTS.md до конца сессии.
+    attr_reader :project_context
+
     def initialize(config:, client:, tools:, ui:, project_context: nil)
       @config = config
       @client = client
@@ -42,28 +47,6 @@ module MiniAgent
       end
 
       summarize(conversation)
-    end
-
-    # Интерактивный режим: одна история на всю сессию.
-    def interactive(input: $stdin)
-      @ui.assistant(Messages::INTERACTIVE_HEADER)
-      @ui.puts(Messages::INTERACTIVE_HINT)
-      conversation = Conversation.new(project_context: @project_context)
-
-      loop do
-        @ui.print("\n#{Messages::PROMPT_SIGN}")
-        line = input.gets
-        break if line.nil?
-
-        task = line.chomp
-        break if task.downcase == "exit"
-        next if task.strip.empty?
-
-        run(task, conversation: conversation)
-      end
-
-      @ui.puts(Messages::GOODBYE)
-      conversation
     end
 
     private

@@ -24,6 +24,14 @@ Metrics/CyclomaticComplexity:
 Metrics/ClassLength:
   Max: 130
 
+# Messages — каталог строк, а не логика: его длина растёт с числом сообщений
+# и о сложности ничего не говорит. Существующее деление на слои (Tool — то,
+# что уходит в модель) смысловое; дробить каталог ещё и по размеру значило бы
+# заводить модули, про которые нельзя сказать, что в них лежит.
+Metrics/ModuleLength:
+  Exclude:
+    - "lib/mini_agent/messages.rb"
+
 # ui:, id, io — устоявшиеся короткие имена, читаются однозначно.
 Naming/MethodParameterName:
   AllowedNames:

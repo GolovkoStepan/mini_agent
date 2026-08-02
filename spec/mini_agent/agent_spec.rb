@@ -203,39 +203,4 @@ RSpec.describe MiniAgent::Agent do
       expect(result.to_a.map { |m| m[:role] }).to eq(%w[system user assistant user assistant])
     end
   end
-
-  describe "#interactive" do
-    it "выполняет задачи из ввода и выходит по exit" do
-      allow(client).to receive(:chat).and_return(["ответ", []])
-
-      agent.interactive(input: StringIO.new("первая задача\nexit\n"))
-
-      expect(client).to have_received(:chat).once
-      expect(out.string).to include("До свидания!")
-    end
-
-    it "накапливает историю между задачами" do
-      allow(client).to receive(:chat).and_return(["раз", []], ["два", []])
-
-      conversation = agent.interactive(input: StringIO.new("задача 1\nзадача 2\nexit\n"))
-
-      expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user assistant user assistant])
-    end
-
-    it "пропускает пустые строки" do
-      allow(client).to receive(:chat).and_return(["ответ", []])
-
-      agent.interactive(input: StringIO.new("\n   \nзадача\nexit\n"))
-
-      expect(client).to have_received(:chat).once
-    end
-
-    # Ctrl+D закрывает поток ввода.
-    it "выходит при обрыве ввода" do
-      allow(client).to receive(:chat)
-
-      expect { agent.interactive(input: StringIO.new("")) }.not_to raise_error
-      expect(out.string).to include("До свидания!")
-    end
-  end
 end

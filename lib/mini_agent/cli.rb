@@ -74,12 +74,21 @@ module MiniAgent
       ui = UI.new(out: @out)
 
       return list_models(config, ui) if options[:list_models]
-      return with_connection(config, ui) { |agent| agent.interactive(input: @input) } if options[:interactive]
+      return interactive(config, ui) if options[:interactive]
 
       task = args.join(" ").strip
       return usage(parser) if task.empty?
 
       with_connection(config, ui) { |agent| agent.run(task) }
+    end
+
+    # Reline получает те же потоки, что и весь остальной ввод-вывод CLI:
+    # он сам решит, включать ли себя, по признаку терминала у обоих.
+    def interactive(config, ui)
+      with_connection(config, ui) do |agent, tools|
+        reader = LineReader.new(input: @input, output: @out)
+        Repl.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader).run
+      end
     end
 
     def with_connection(config, ui, &)
@@ -115,7 +124,8 @@ module MiniAgent
       context = project_context(config, ui)
 
       client.start do |connected|
-        yield Agent.new(config: config, client: connected, tools: tools, ui: ui, project_context: context)
+        agent = Agent.new(config: config, client: connected, tools: tools, ui: ui, project_context: context)
+        yield agent, tools
       end
     end
 
