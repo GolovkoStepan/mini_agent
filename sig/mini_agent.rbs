@@ -59,6 +59,7 @@ module MiniAgent
     def chat_uri: () -> URI::Generic
     def models_uri: () -> URI::Generic
     def cwd: () -> String?
+    def log: () -> String?
     def use_ssl?: () -> bool
   end
 
@@ -72,8 +73,24 @@ module MiniAgent
     def filename: () -> String?
   end
 
+  class Transcript
+    def initialize: (String path, ?ui: UI?, ?clock: untyped) -> void
+    def path: () -> String
+    def session: (Config config) -> void
+    def message: (message) -> void
+    def close: () -> void
+  end
+
+  class History
+    attr_reader project_context: String?
+    attr_reader transcript: Transcript?
+
+    def initialize: (?project_context: String?, ?transcript: Transcript?) -> void
+    def build: () -> Conversation
+  end
+
   class Conversation
-    def initialize: (?system_prompt: String?, ?project_context: String?) -> void
+    def initialize: (?system_prompt: String?, ?project_context: String?, ?transcript: Transcript?) -> void
     def system: (String content) -> message
     def user: (String content) -> message
     def assistant: (String? content, ?tool_calls: Array[tool_call]?) -> message
@@ -198,10 +215,14 @@ module MiniAgent
   class Agent
     MAX_TOOL_OUTPUT: Integer
 
-    attr_reader project_context: String?
-
-    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?project_context: String?) -> void
+    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History) -> void
+    def new_conversation: () -> Conversation
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
+  end
+
+  class AgentBuilder
+    def initialize: (config: Config, ui: UI, ?input: IO, ?output: IO) -> void
+    def call: [T] () { (Agent, ToolRegistry) -> T } -> T
   end
 
   class LineReader

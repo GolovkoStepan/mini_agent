@@ -67,11 +67,14 @@ module MiniAgent
     end
 
     # Показывается и каталог: с --cwd агент работает не там, откуда запущен,
-    # и это ровно то, что забывается за время диалога.
+    # и это ровно то, что забывается за время диалога. Журнал — по той же
+    # причине: строка о нём печатается один раз при запуске и уезжает вверх,
+    # а пишется он всю сессию.
     def model
       @ui.puts(format(Messages::CMD_MODEL_LINE, model: @config.model))
       @ui.puts(format(Messages::CMD_SERVER_LINE, url: @config.base_url))
       @ui.puts(format(Messages::CMD_CWD_LINE, path: @config.cwd || Dir.pwd))
+      @ui.puts(format(Messages::LOG_STARTED, path: @config.log)) if @config.log
       :handled
     end
 

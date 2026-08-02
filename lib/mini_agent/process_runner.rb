@@ -13,6 +13,11 @@ module MiniAgent
   # последовательно, команда с большим выводом заблокируется на переполненном
   # буфере пайпа, а мы будем ждать её вечно.
   class ProcessRunner
+    # U+FFFD вместо негодного байта: он же стоит в выводе `less` и подобных,
+    # и человек, увидев его в результате, понимает, что смотрит на двоичные
+    # данные, а не на испорченный текст.
+    REPLACEMENT = "�"
+
     Result = Struct.new(:stdout, :stderr, :exit_code, keyword_init: true) do
       def success?
         exit_code.zero?
@@ -42,8 +47,8 @@ module MiniAgent
         wait_or_kill(wait_thr, out_reader, err_reader)
 
         Result.new(
-          stdout: out_reader.value.to_s,
-          stderr: err_reader.value.to_s,
+          stdout: text(out_reader.value),
+          stderr: text(err_reader.value),
           exit_code: exit_code_for(wait_thr.value)
         )
       end
@@ -53,6 +58,19 @@ module MiniAgent
 
     def spawn_options
       @cwd ? { chdir: @cwd } : {}
+    end
+
+    # Вывод команды — произвольные байты, а не обязательно текст. Ruby помечает
+    # его UTF-8, не проверяя содержимого, и первый же `head -c 30 /bin/ls`
+    # ронял агента насквозь: JSON::GeneratorError при сборке тела запроса,
+    # сырой бэктрейс вместо ответа (проверено живьём). Чинить это в JSON поздно
+    # — испорченная строка успевает разойтись по истории и логу, поэтому
+    # заменяем негодные байты здесь, на самой границе с внешним миром.
+    def text(value)
+      string = value.to_s
+      return string if string.valid_encoding?
+
+      string.scrub(REPLACEMENT)
     end
 
     def wait_or_kill(wait_thr, out_reader, err_reader)

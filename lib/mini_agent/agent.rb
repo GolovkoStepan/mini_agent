@@ -10,24 +10,25 @@ module MiniAgent
     # которое UI применяет для читаемости консоли (UI::PREVIEW_LINES).
     MAX_TOOL_OUTPUT = 10_000
 
-    # Нужен Repl: команда /clear начинает историю заново, и описание проекта
-    # должно попасть в новую Conversation — иначе после очистки агент забывал бы
-    # про AGENTS.md до конца сессии.
-    attr_reader :project_context
-
-    def initialize(config:, client:, tools:, ui:, project_context: nil)
+    def initialize(config:, client:, tools:, ui:, history: History.new)
       @config = config
       @client = client
       @tools = tools
       @ui = ui
-      @project_context = project_context
+      @history = history
     end
+
+    # Пустая история со всем, что агенту для неё нужно. Repl зовёт этот же
+    # метод по /clear: команда начинает диалог заново, и без общей точки
+    # сборки каждое новое поле (описание проекта, журнал) пришлось бы
+    # добавлять и там — молча теряясь при первой же очистке.
+    def new_conversation = @history.build
 
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
     # это позволяет интерактивному режиму продолжать диалог с накопленной
     # историей, передавая её обратно через conversation:.
     def run(user_message = nil, conversation: nil)
-      conversation ||= Conversation.new(project_context: @project_context)
+      conversation ||= new_conversation
       conversation.user(user_message) if user_message
 
       interrupted(conversation) { turns(conversation) }

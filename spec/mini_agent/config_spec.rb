@@ -130,4 +130,42 @@ RSpec.describe MiniAgent::Config do
       expect(described_class.new({}, env: { "AGENT_CWD" => "" }).cwd).to be_nil
     end
   end
+
+  describe "журнал" do
+    around do |example|
+      Dir.mktmpdir { |dir| example.run(@dir = dir) }
+    end
+
+    # В журнал уходят и задачи, и содержимое всего, что агент прочитал.
+    # Включать такое молча нельзя.
+    it "по умолчанию выключен" do
+      expect(described_class.new({}, env: {}).log).to be_nil
+    end
+
+    it "разворачивает путь в абсолютный" do
+      config = described_class.new({ log: File.join(@dir, "session.jsonl") }, env: {})
+
+      expect(config.log).to eq(File.join(File.expand_path(@dir), "session.jsonl"))
+    end
+
+    it "читается из AGENT_LOG" do
+      config = described_class.new({}, env: { "AGENT_LOG" => File.join(@dir, "s.jsonl") })
+
+      expect(config.log).to end_with("s.jsonl")
+    end
+
+    # Файла ещё нет — это норма, а вот каталога быть обязан.
+    it "не требует существования самого файла" do
+      expect { described_class.new({ log: File.join(@dir, "нового.jsonl") }, env: {}) }.not_to raise_error
+    end
+
+    it "падает сразу, если каталога нет" do
+      expect { described_class.new({ log: "/нет/такого/каталога/s.jsonl" }, env: {}) }
+        .to raise_error(MiniAgent::ConfigError, /Каталог для журнала не найден/)
+    end
+
+    it "пустое значение равносильно отсутствию" do
+      expect(described_class.new({}, env: { "AGENT_LOG" => "" }).log).to be_nil
+    end
+  end
 end

@@ -31,6 +31,7 @@ module MiniAgent
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
       [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
       [:cwd, "--cwd DIR", Messages::OPT_CWD],
+      [:log, "--log FILE", Messages::OPT_LOG],
       [:help, "-h", "--help", Messages::OPT_HELP],
       [:version, "-v", "--version", Messages::OPT_VERSION]
     ].freeze
@@ -117,40 +118,10 @@ module MiniAgent
       connecting(config, ui) { ModelsCommand.new(config: config, ui: ui).call }
     end
 
-    # Соединение с LLM живёт ровно столько, сколько работает агент.
-    def with_agent(config, ui)
-      client = LLMClient.new(config: config, ui: ui)
-      tools = build_tools(config, ui)
-      context = project_context(config, ui)
-
-      client.start do |connected|
-        agent = Agent.new(config: config, client: connected, tools: tools, ui: ui, project_context: context)
-        yield agent, tools
-      end
-    end
-
-    # О подхваченном описании проекта сообщаем: молчаливое изменение поведения
-    # агента хуже лишней строки в выводе — иначе непонятно, откуда он вдруг
-    # знает про принятые в проекте команды.
-    # Описание ищется в рабочем каталоге агента, а не в том, откуда его
-    # запустили: с --cwd это разные места, и читать описание одного проекта,
-    # работая в другом, — худшее из возможных поведений.
-    def project_context(config, ui)
-      loader = ProjectContext.new(config.cwd || Dir.pwd)
-      content = loader.load
-      ui.puts(format(Messages::CONTEXT_LOADED, name: loader.filename)) if content
-
-      content
-    end
-
-    def build_tools(config, ui)
-      guard = CommandGuard.new(
-        allow_unsafe: config.allow_unsafe?,
-        prompt: Prompt.new(input: @input, output: @out),
-        ui: ui
-      )
-      runner = ProcessRunner.new(timeout: config.timeout, cwd: config.cwd)
-      ToolRegistry.new([Tools::Bash.new(guard: guard, runner: runner)])
+    # Сборка агента со всеми зависимостями живёт в AgentBuilder: здесь
+    # остаётся командная строка — разбор аргументов и коды возврата.
+    def with_agent(config, ui, &)
+      AgentBuilder.new(config: config, ui: ui, input: @input, output: @out).call(&)
     end
 
     def handle(action, parser = nil)

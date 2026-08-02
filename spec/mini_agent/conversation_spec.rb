@@ -113,6 +113,32 @@ RSpec.describe MiniAgent::Conversation do
     end
   end
 
+  describe "журнал" do
+    let(:transcript) { instance_spy(MiniAgent::Transcript) }
+
+    it "отдаёт журналу каждое сообщение" do
+      conversation = described_class.new(system_prompt: nil, transcript: transcript)
+      conversation.user("задача")
+      conversation.assistant("ответ")
+      conversation.tool("call_1", "вывод")
+
+      expect(transcript).to have_received(:message).exactly(3).times
+    end
+
+    # Системный промпт добавляется в конструкторе, до того как кто-либо
+    # успел бы залогировать его снаружи, — а он и есть самое интересное,
+    # когда разбираешься, почему модель повела себя странно.
+    it "пишет и системный промпт" do
+      described_class.new(system_prompt: "правила", transcript: transcript)
+
+      expect(transcript).to have_received(:message).with(hash_including(role: "system"))
+    end
+
+    it "без журнала работает как прежде" do
+      expect { described_class.new(system_prompt: nil).user("задача") }.not_to raise_error
+    end
+  end
+
   it "не даёт менять историю через возвращённый массив" do
     conversation = described_class.new(system_prompt: "s")
     conversation.to_a.first[:content] = "подмена"

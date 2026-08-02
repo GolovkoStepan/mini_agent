@@ -114,12 +114,29 @@ RSpec.describe MiniAgent::Repl do
       expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user assistant])
     end
 
+    # /clear заводит историю заново, и журнал должен уехать в неё вместе с
+    # остальным: иначе запись обрывалась бы на первой же очистке, причём молча.
+    it "продолжает писать журнал после /clear" do
+      allow(client).to receive(:chat).and_return(["ответ", []])
+      transcript = instance_spy(MiniAgent::Transcript)
+      agent = MiniAgent::Agent.new(
+        config: config, client: client, tools: tools, ui: ui,
+        history: MiniAgent::History.new(transcript: transcript)
+      )
+      reader = MiniAgent::LineReader.new(input: StringIO.new("/clear\nзадача\nexit\n"), output: out)
+
+      described_class.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader).run
+
+      expect(transcript).to have_received(:message).with(hash_including(role: "user", content: "задача"))
+    end
+
     # После /clear описание проекта должно вернуться в новую историю:
     # иначе агент забывал бы про AGENTS.md до конца сессии.
     it "сохраняет описание проекта после /clear" do
       allow(client).to receive(:chat)
       agent = MiniAgent::Agent.new(
-        config: config, client: client, tools: tools, ui: ui, project_context: "тесты: make spec"
+        config: config, client: client, tools: tools, ui: ui,
+        history: MiniAgent::History.new(project_context: "тесты: make spec")
       )
       reader = MiniAgent::LineReader.new(input: StringIO.new("/clear\nexit\n"), output: out)
 

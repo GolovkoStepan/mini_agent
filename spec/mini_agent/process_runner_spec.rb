@@ -137,6 +137,28 @@ RSpec.describe MiniAgent::ProcessRunner do
     end
   end
 
+  # Вывод команды — произвольные байты. Ruby помечает его UTF-8, не проверяя
+  # содержимого, и такая строка доходит до JSON.generate, где роняет агента
+  # целиком (проверено живьём на `head -c 30 /bin/ls`).
+  describe "двоичный вывод" do
+    it "возвращает строку, годную для JSON" do
+      result = runner.call("head -c 40 /bin/ls")
+
+      expect(result.stdout).to be_valid_encoding
+      expect { JSON.generate({ content: result.stdout }) }.not_to raise_error
+    end
+
+    it "то же самое для stderr" do
+      result = runner.call("head -c 40 /bin/ls >&2")
+
+      expect(result.stderr).to be_valid_encoding
+    end
+
+    it "не трогает обычный текст" do
+      expect(runner.call("echo привет").stdout.strip).to eq("привет")
+    end
+  end
+
   # Если читать stdout и stderr последовательно, команда с большим выводом
   # заблокируется на переполненном буфере пайпа и рантайм зависнет.
   it "не впадает в дедлок при выводе больше буфера пайпа" do

@@ -13,8 +13,13 @@ module MiniAgent
     # к системному промпту, а не отдельным сообщением: шаблоны чата ряда
     # моделей (Qwen и другие) требуют, чтобы system-сообщение было ровно одно
     # и первое, и отвечают HTTP 400 на второе.
-    def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil)
+    # transcript — необязательный журнал (см. Transcript). Пишет отсюда, а не
+    # из Agent: сообщения добавляются и мимо цикла ходов — системный промпт
+    # здесь же в конструкторе, а Repl по /clear заводит историю заново, и
+    # логирование в Agent пришлось бы дублировать на каждом таком месте.
+    def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil, transcript: nil)
       @messages = []
+      @transcript = transcript
       prompt = build_prompt(system_prompt, project_context)
       system(prompt) if prompt
     end
@@ -77,6 +82,7 @@ module MiniAgent
 
     def push(message)
       @messages << message
+      @transcript&.message(message)
       message
     end
 

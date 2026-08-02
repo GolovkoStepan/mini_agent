@@ -79,7 +79,7 @@ module MiniAgent
     end
 
     def new_conversation
-      Conversation.new(project_context: @agent.project_context)
+      @agent.new_conversation
     end
 
     def clear

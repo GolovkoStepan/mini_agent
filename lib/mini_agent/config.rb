@@ -27,7 +27,10 @@ module MiniAgent
       timeout: 120,
       # nil, а не Dir.pwd: умолчания замораживаются при загрузке файла, а
       # текущий каталог к моменту создания Config может быть уже другим.
-      cwd: nil
+      cwd: nil,
+      # Журнал по умолчанию выключен: в нём оседают и задачи, и содержимое
+      # файлов, которые агент читал. Включать такое молча нельзя.
+      log: nil
     }.freeze
 
     ENV_KEYS = {
@@ -40,11 +43,12 @@ module MiniAgent
       max_tokens: "MAX_TOKENS",
       allow_unsafe: "ALLOW_UNSAFE",
       timeout: "COMMAND_TIMEOUT",
-      cwd: "AGENT_CWD"
+      cwd: "AGENT_CWD",
+      log: "AGENT_LOG"
     }.freeze
 
     attr_reader :base_url, :api_key, :model, :max_turns,
-                :retry_count, :retry_delay, :max_tokens, :timeout, :cwd
+                :retry_count, :retry_delay, :max_tokens, :timeout, :cwd, :log
 
     def initialize(options = {}, env: ENV)
       @options = options
@@ -54,6 +58,7 @@ module MiniAgent
       read_limits
       @allow_unsafe = to_bool(fetch(:allow_unsafe))
       @cwd = expand_cwd(fetch(:cwd))
+      @log = expand_log(fetch(:log))
     end
 
     def allow_unsafe?
@@ -110,6 +115,23 @@ module MiniAgent
 
       path = File.expand_path(value.to_s)
       raise ConfigError, format(Messages::CWD_NOT_FOUND, path: path) unless File.directory?(path)
+
+      path
+    end
+
+    # Путь журнала разворачивается относительно каталога запуска, а не --cwd:
+    # `--log session.jsonl` человек пишет там, где стоит сам, и искать файл
+    # он пойдёт туда же, даже если команды агента выполняются в другом месте.
+    #
+    # Каталог проверяется здесь по той же причине, что и для --cwd: иначе
+    # опечатка в пути всплывёт после первого же запроса к модели, когда
+    # писать станет некуда, а платить за запрос уже пришлось.
+    def expand_log(value)
+      return nil if value.nil? || value.to_s.empty?
+
+      path = File.expand_path(value.to_s)
+      dir = File.dirname(path)
+      raise ConfigError, format(Messages::LOG_DIR_NOT_FOUND, path: dir) unless File.directory?(dir)
 
       path
     end

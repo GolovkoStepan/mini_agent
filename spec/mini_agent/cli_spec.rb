@@ -129,6 +129,53 @@ RSpec.describe MiniAgent::CLI do
       end
     end
 
+    describe "--log" do
+      around do |example|
+        Dir.mktmpdir { |dir| example.run(@dir = dir) }
+      end
+
+      def log_path = File.join(@dir, "session.jsonl")
+
+      def records = File.readlines(log_path).map { |line| JSON.parse(line) }
+
+      it "пишет заголовок сессии и все сообщения диалога" do
+        start(["--base-url", "http://cli.test/v1", "--log", log_path, "посчитай файлы"])
+
+        expect(records.map { |r| r["type"] }).to eq(%w[session message message message])
+        expect(records.map { |r| r["role"] }).to eq([nil, "system", "user", "assistant"])
+      end
+
+      it "сохраняет текст задачи и ответ модели" do
+        start(["--base-url", "http://cli.test/v1", "--log", log_path, "посчитай файлы"])
+
+        contents = records.map { |r| r["content"] }
+        expect(contents).to include("посчитай файлы")
+        expect(contents).to include("готово")
+      end
+
+      # Молчаливая запись задач и содержимого прочитанных файлов — не то,
+      # о чём стоит умалчивать.
+      it "сообщает о включённом журнале" do
+        start(["--base-url", "http://cli.test/v1", "--log", log_path, "задача"])
+
+        expect(out.string).to include("Журнал: #{log_path}")
+      end
+
+      it "без опции файл не создаётся" do
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(File.exist?(log_path)).to be(false)
+      end
+
+      # Ошибка употребления, а не сбой связи: код 1, а не 2.
+      it "сообщает о несуществующем каталоге с кодом 1" do
+        code = start(["--base-url", "http://cli.test/v1", "--log", "/нет/такого/s.jsonl", "задача"])
+
+        expect(code).to eq(1)
+        expect(out.string).to include("Каталог для журнала не найден")
+      end
+    end
+
     describe "контекст проекта" do
       it "подмешивает описание проекта в системный промпт" do
         allow(MiniAgent::ProjectContext).to receive(:new).and_return(

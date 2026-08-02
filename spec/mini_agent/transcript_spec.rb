@@ -1,0 +1,108 @@
+# frozen_string_literal: true
+
+require "tmpdir"
+require "json"
+
+RSpec.describe MiniAgent::Transcript do
+  around do |example|
+    Dir.mktmpdir { |dir| @dir = dir and example.run }
+  end
+
+  let(:path) { File.join(@dir, "session.jsonl") }
+  let(:out) { StringIO.new }
+  let(:ui) { MiniAgent::UI.new(out: out, tty: false) }
+
+  def records
+    File.readlines(path).map { |line| JSON.parse(line) }
+  end
+
+  describe "запись" do
+    it "пишет по объекту JSON на строку" do
+      log = described_class.new(path)
+      log.message({ role: "user", content: "задача" })
+      log.message({ role: "assistant", content: "ответ" })
+      log.close
+
+      expect(records.map { |r| r["role"] }).to eq(%w[user assistant])
+      expect(records.first).to include("type" => "message", "content" => "задача")
+    end
+
+    it "проставляет время каждой записи" do
+      clock = double(now: Time.at(0).utc)
+      log = described_class.new(path, clock: clock)
+      log.message({ role: "user", content: "задача" })
+      log.close
+
+      expect(records.first["time"]).to eq("1970-01-01T00:00:00Z")
+    end
+
+    # Дописывание, а не перезапись: несколько запусков с одним --log должны
+    # складываться в один файл, иначе прошлый прогон теряется ровно тогда,
+    # когда его и хотели сравнить с новым.
+    it "дописывает файл, а не перезаписывает" do
+      described_class.new(path).tap { |log| log.message({ role: "user", content: "первый" }) }.close
+      described_class.new(path).tap { |log| log.message({ role: "user", content: "второй" }) }.close
+
+      expect(records.map { |r| r["content"] }).to eq(%w[первый второй])
+    end
+  end
+
+  describe "заголовок сессии" do
+    it "пишет модель, сервер и каталог" do
+      config = MiniAgent::Config.new({ model: "test-model", base_url: "http://example:1234/v1" }, env: {})
+      log = described_class.new(path)
+      log.session(config)
+      log.close
+
+      expect(records.first).to include("type" => "session", "model" => "test-model")
+      expect(records.first["base_url"]).to eq("http://example:1234/v1")
+    end
+
+    # Лог заводят, чтобы показать его кому-то ещё; ключ в нём — утечка,
+    # которую никто не заметит.
+    it "не пишет api_key" do
+      config = MiniAgent::Config.new({ api_key: "секретный-ключ" }, env: {})
+      log = described_class.new(path)
+      log.session(config)
+      log.close
+
+      expect(File.read(path)).not_to include("секретный-ключ")
+    end
+  end
+
+  describe "устойчивость" do
+    # Данные пишутся по мере появления: разбираться в логе приходится как раз
+    # тогда, когда до close дело не дошло.
+    it "оставляет записи на диске до закрытия файла" do
+      log = described_class.new(path)
+      log.message({ role: "user", content: "задача" })
+
+      expect(records.size).to eq(1)
+      log.close
+    end
+
+    it "молчит после закрытия, а не падает на закрытом файле" do
+      log = described_class.new(path, ui: ui)
+      log.close
+
+      expect { log.message({ role: "user", content: "задача" }) }.not_to raise_error
+      expect(out.string).to be_empty
+    end
+
+    it "сообщает о сбое и прекращает запись" do
+      log = described_class.new(path, ui: ui)
+      # Сообщение, которое JSON сериализовать не может.
+      log.message({ role: "user", content: "\xFF".dup.force_encoding("UTF-8") })
+      log.message({ role: "user", content: "после сбоя" })
+
+      expect(out.string).to include("Запись в журнал прекращена")
+      expect(out.string.scan("Запись в журнал прекращена").size).to eq(1)
+      expect(records).to be_empty
+    end
+
+    it "объясняет, почему файл не открылся" do
+      expect { described_class.new(File.join(@dir, "нет", "session.jsonl")) }
+        .to raise_error(MiniAgent::ConfigError, /Не удалось открыть журнал/)
+    end
+  end
+end
