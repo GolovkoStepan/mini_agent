@@ -23,6 +23,13 @@ module MiniAgent
       3. After gathering enough information or completing the task, give your final answer in natural language.
       4. To finish, reply with a regular message (no tool call).
 
+      Each `bash` call runs in a fresh shell. Nothing carries over between calls:
+      not the working directory, not environment variables, not shell functions.
+      A `cd` on its own is silently undone — the next call starts where the first
+      one did. Chain what belongs together in a single call instead:
+      `cd sub && ls`, not `cd sub` followed by `ls`. Use absolute paths when the
+      target is far from the working directory.
+
       Be concise. Explain what you're doing before each command.
     PROMPT
 
@@ -121,6 +128,7 @@ module MiniAgent
     CONNECT_HINT = "  Проверьте, что сервер запущен, либо укажите другой адрес: --base-url URL или LLM_BASE_URL."
     # Отдельный случай: адрес разобрать не удалось. Совет «проверьте, что
     # сервер запущен» здесь был бы ложным следом.
+    CWD_NOT_FOUND = "Рабочий каталог не найден: %<path>s"
     INVALID_URL = "Некорректный адрес LLM: %<url>s"
     INVALID_URL_HINT = "  Ожидается вид http://хост:порт/v1"
     EMPTY_RESPONSE = "Модель вернула пустой ответ без вызовов инструментов. Завершение."
@@ -137,6 +145,7 @@ module MiniAgent
     OPT_BASE_URL = "Базовый URL LLM-сервера"
     OPT_MODEL = "Имя модели"
     OPT_LIST_MODELS = "Показать модели, загруженные на сервере"
+    OPT_CWD = "Рабочий каталог для команд агента"
     OPT_HELP = "Показать справку"
     OPT_VERSION = "Показать версию"
     CONTEXT_LOADED = "Контекст проекта: %<name>s"

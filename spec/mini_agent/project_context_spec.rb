@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "tmpdir"
-
 RSpec.describe MiniAgent::ProjectContext do
   around do |example|
     Dir.mktmpdir { |dir| example.run(@dir = dir) }

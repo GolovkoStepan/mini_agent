@@ -15,6 +15,10 @@ module MiniAgent
 
   # Не удалось получить корректный ответ от LLM после всех попыток.
   class LLMError < Error; end
+
+  # Настройки заданы неверно: например, указан несуществующий каталог.
+  # Проверяется до запуска, чтобы ошибка не всплыла посреди работы.
+  class ConfigError < Error; end
 end
 
 require_relative "mini_agent/process_runner"
@@ -27,4 +31,5 @@ require_relative "mini_agent/error_response"
 require_relative "mini_agent/models_request"
 require_relative "mini_agent/llm_client"
 require_relative "mini_agent/agent"
+require_relative "mini_agent/models_command"
 require_relative "mini_agent/cli"

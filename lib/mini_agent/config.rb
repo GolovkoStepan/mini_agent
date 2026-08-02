@@ -24,7 +24,10 @@ module MiniAgent
       retry_delay: 2,
       max_tokens: 4096,
       allow_unsafe: false,
-      timeout: 120
+      timeout: 120,
+      # nil, а не Dir.pwd: умолчания замораживаются при загрузке файла, а
+      # текущий каталог к моменту создания Config может быть уже другим.
+      cwd: nil
     }.freeze
 
     ENV_KEYS = {
@@ -36,25 +39,21 @@ module MiniAgent
       retry_delay: "RETRY_DELAY",
       max_tokens: "MAX_TOKENS",
       allow_unsafe: "ALLOW_UNSAFE",
-      timeout: "COMMAND_TIMEOUT"
+      timeout: "COMMAND_TIMEOUT",
+      cwd: "AGENT_CWD"
     }.freeze
 
     attr_reader :base_url, :api_key, :model, :max_turns,
-                :retry_count, :retry_delay, :max_tokens, :timeout
+                :retry_count, :retry_delay, :max_tokens, :timeout, :cwd
 
     def initialize(options = {}, env: ENV)
       @options = options
       @env = env
 
-      @base_url = fetch(:base_url).to_s.sub(%r{/+\z}, "")
-      @api_key = fetch(:api_key).to_s
-      @model = fetch(:model).to_s
-      @max_turns = fetch(:max_turns).to_i
-      @retry_count = fetch(:retry_count).to_i
-      @retry_delay = fetch(:retry_delay).to_f
-      @max_tokens = fetch(:max_tokens).to_i
-      @timeout = fetch(:timeout).to_f
+      read_connection
+      read_limits
       @allow_unsafe = to_bool(fetch(:allow_unsafe))
+      @cwd = expand_cwd(fetch(:cwd))
     end
 
     def allow_unsafe?
@@ -75,6 +74,22 @@ module MiniAgent
 
     private
 
+    # Адрес и учётные данные сервера.
+    def read_connection
+      @base_url = fetch(:base_url).to_s.sub(%r{/+\z}, "")
+      @api_key = fetch(:api_key).to_s
+      @model = fetch(:model).to_s
+    end
+
+    # Числовые ограничения: ходы, повторы, токены, таймаут.
+    def read_limits
+      @max_turns = fetch(:max_turns).to_i
+      @retry_count = fetch(:retry_count).to_i
+      @retry_delay = fetch(:retry_delay).to_f
+      @max_tokens = fetch(:max_tokens).to_i
+      @timeout = fetch(:timeout).to_f
+    end
+
     # options.key? вместо проверки на истинность: иначе явное false
     # (флаг --no-allow-unsafe) не смогло бы перебить ALLOW_UNSAFE=true.
     def fetch(key)
@@ -84,6 +99,19 @@ module MiniAgent
       return env_value unless env_value.nil? || env_value.empty?
 
       DEFAULTS.fetch(key)
+    end
+
+    # Каталог проверяется здесь, а не при первом запуске команды: иначе опечатка
+    # в пути всплывёт посреди работы невнятной ошибкой от Open3, уже после
+    # запроса к модели. Развёрнутый путь — чтобы `--cwd .` и `~/проект`
+    # попадали в вывод в понятном человеку виде.
+    def expand_cwd(value)
+      return nil if value.nil? || value.to_s.empty?
+
+      path = File.expand_path(value.to_s)
+      raise ConfigError, format(Messages::CWD_NOT_FOUND, path: path) unless File.directory?(path)
+
+      path
     end
 
     def to_bool(value)

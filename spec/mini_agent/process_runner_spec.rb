@@ -1,6 +1,42 @@
 # frozen_string_literal: true
 
 RSpec.describe MiniAgent::ProcessRunner do
+  describe "рабочий каталог" do
+    around do |example|
+      Dir.mktmpdir { |dir| example.run(@dir = dir) }
+    end
+
+    it "выполняет команду в указанном каталоге" do
+      runner = described_class.new(cwd: @dir)
+
+      # Символические ссылки: на macOS /tmp ведёт в /private/tmp.
+      expect(runner.call("pwd").stdout.strip).to eq(File.realpath(@dir))
+    end
+
+    it "по умолчанию работает в каталоге процесса" do
+      runner = described_class.new
+
+      expect(runner.call("pwd").stdout.strip).to eq(File.realpath(Dir.pwd))
+    end
+
+    # Dir.chdir сменил бы каталог всему агенту — и тому, где он ищет описание
+    # проекта, и тому, куда пишет. Побочный эффект на весь процесс ради одной
+    # команды здесь не нужен.
+    it "не меняет каталог самого агента" do
+      before = Dir.pwd
+      described_class.new(cwd: @dir).call("pwd")
+
+      expect(Dir.pwd).to eq(before)
+    end
+
+    it "видит файлы рабочего каталога" do
+      File.write(File.join(@dir, "заметка.txt"), "содержимое")
+      runner = described_class.new(cwd: @dir)
+
+      expect(runner.call("cat заметка.txt").stdout).to eq("содержимое")
+    end
+  end
+
   subject(:runner) { described_class.new(timeout: 5) }
 
   it "возвращает stdout и нулевой код выхода" do

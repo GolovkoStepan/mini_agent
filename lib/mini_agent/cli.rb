@@ -30,6 +30,7 @@ module MiniAgent
       [:model, "--model NAME", Messages::OPT_MODEL],
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
       [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
+      [:cwd, "--cwd DIR", Messages::OPT_CWD],
       [:help, "-h", "--help", Messages::OPT_HELP],
       [:version, "-v", "--version", Messages::OPT_VERSION]
     ].freeze
@@ -55,6 +56,11 @@ module MiniAgent
     rescue OptionParser::ParseError => e
       @out.puts(e.message)
       @out.puts(@parser)
+      EXIT_USAGE
+    # Настройки заданы неверно — например, опечатка в --cwd. Это ошибка
+    # употребления, а не сбой связи, поэтому код 1, а не 2.
+    rescue ConfigError => e
+      @out.puts(e.message)
       EXIT_USAGE
     rescue Interrupt
       @out.puts(Messages::INTERRUPTED)
@@ -98,31 +104,15 @@ module MiniAgent
       EXIT_CONNECT
     end
 
-    # Справка о том, что реально загружено на сервере. Нужна потому, что
-    # умолчание Config::DEFAULTS[:model] совпадает с загруженной моделью
-    # далеко не всегда, а LM Studio на незнакомое имя не отвечает ошибкой —
-    # он молча подставляет свою, и подмену нечем заметить.
     def list_models(config, ui)
-      connecting(config, ui) do
-        names = LLMClient.new(config: config, ui: ui).start(&:models)
-
-        if names.empty?
-          ui.warn(format(Messages::NO_MODELS, url: config.base_url))
-        else
-          ui.models(names, selected: config.model, url: config.base_url)
-        end
-        EXIT_OK
-      end
-    rescue LLMError => e
-      ui.error(e.message)
-      EXIT_CONNECT
+      connecting(config, ui) { ModelsCommand.new(config: config, ui: ui).call }
     end
 
     # Соединение с LLM живёт ровно столько, сколько работает агент.
     def with_agent(config, ui)
       client = LLMClient.new(config: config, ui: ui)
       tools = build_tools(config, ui)
-      context = project_context(ui)
+      context = project_context(config, ui)
 
       client.start do |connected|
         yield Agent.new(config: config, client: connected, tools: tools, ui: ui, project_context: context)
@@ -132,8 +122,11 @@ module MiniAgent
     # О подхваченном описании проекта сообщаем: молчаливое изменение поведения
     # агента хуже лишней строки в выводе — иначе непонятно, откуда он вдруг
     # знает про принятые в проекте команды.
-    def project_context(ui)
-      loader = ProjectContext.new
+    # Описание ищется в рабочем каталоге агента, а не в том, откуда его
+    # запустили: с --cwd это разные места, и читать описание одного проекта,
+    # работая в другом, — худшее из возможных поведений.
+    def project_context(config, ui)
+      loader = ProjectContext.new(config.cwd || Dir.pwd)
       content = loader.load
       ui.puts(format(Messages::CONTEXT_LOADED, name: loader.filename)) if content
 
@@ -146,7 +139,7 @@ module MiniAgent
         prompt: Prompt.new(input: @input, output: @out),
         ui: ui
       )
-      runner = ProcessRunner.new(timeout: config.timeout)
+      runner = ProcessRunner.new(timeout: config.timeout, cwd: config.cwd)
       ToolRegistry.new([Tools::Bash.new(guard: guard, runner: runner)])
     end
 

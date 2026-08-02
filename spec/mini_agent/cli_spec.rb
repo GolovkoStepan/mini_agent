@@ -94,6 +94,41 @@ RSpec.describe MiniAgent::CLI do
       expect(matcher).to have_been_made
     end
 
+    describe "--cwd" do
+      around do |example|
+        Dir.mktmpdir { |dir| example.run(@dir = dir) }
+      end
+
+      it "передаёт каталог в исполнитель команд" do
+        allow(MiniAgent::ProcessRunner).to receive(:new).and_call_original
+
+        start(["--base-url", "http://cli.test/v1", "--cwd", @dir, "задача"])
+
+        expect(MiniAgent::ProcessRunner)
+          .to have_received(:new).with(hash_including(cwd: File.expand_path(@dir)))
+      end
+
+      # Читать описание одного проекта, работая в другом, — худшее из
+      # возможных поведений.
+      it "ищет описание проекта в рабочем каталоге, а не в каталоге запуска" do
+        File.write(File.join(@dir, "AGENTS.md"), "Описание из --cwd")
+
+        start(["--base-url", "http://cli.test/v1", "--cwd", @dir, "задача"])
+
+        matcher = a_request(:post, endpoint)
+                  .with { |req| JSON.parse(req.body)["messages"].first["content"].include?("Описание из --cwd") }
+        expect(matcher).to have_been_made
+      end
+
+      # Ошибка употребления, а не сбой связи: код 1, а не 2.
+      it "сообщает о несуществующем каталоге с кодом 1" do
+        code = start(["--base-url", "http://cli.test/v1", "--cwd", "/нет/такого", "задача"])
+
+        expect(code).to eq(1)
+        expect(out.string).to include("Рабочий каталог не найден")
+      end
+    end
+
     describe "контекст проекта" do
       it "подмешивает описание проекта в системный промпт" do
         allow(MiniAgent::ProjectContext).to receive(:new).and_return(

@@ -90,4 +90,44 @@ RSpec.describe MiniAgent::Config do
       expect(config.max_tokens).to eq(8192)
     end
   end
+
+  describe "рабочий каталог" do
+    around do |example|
+      Dir.mktmpdir { |dir| example.run(@dir = dir) }
+    end
+
+    it "по умолчанию не задан" do
+      expect(described_class.new({}, env: {}).cwd).to be_nil
+    end
+
+    it "разворачивает относительный путь в абсолютный" do
+      config = described_class.new({ cwd: @dir }, env: {})
+
+      expect(config.cwd).to eq(File.expand_path(@dir))
+    end
+
+    it "читается из AGENT_CWD" do
+      config = described_class.new({}, env: { "AGENT_CWD" => @dir })
+
+      expect(config.cwd).to eq(File.expand_path(@dir))
+    end
+
+    # Иначе опечатка в пути всплывёт посреди работы невнятной ошибкой Open3,
+    # уже после запроса к модели.
+    it "падает сразу, если каталога нет" do
+      expect { described_class.new({ cwd: "/нет/такого/каталога" }, env: {}) }
+        .to raise_error(MiniAgent::ConfigError, /Рабочий каталог не найден/)
+    end
+
+    it "падает, если путь ведёт на файл" do
+      path = File.join(@dir, "файл.txt")
+      File.write(path, "не каталог")
+
+      expect { described_class.new({ cwd: path }, env: {}) }.to raise_error(MiniAgent::ConfigError)
+    end
+
+    it "пустое значение равносильно отсутствию" do
+      expect(described_class.new({}, env: { "AGENT_CWD" => "" }).cwd).to be_nil
+    end
+  end
 end

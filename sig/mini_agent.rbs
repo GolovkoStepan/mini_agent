@@ -14,6 +14,9 @@ module MiniAgent
   class LLMError < Error
   end
 
+  class ConfigError < Error
+  end
+
   module Messages
     SYSTEM_PROMPT: String
     STOP_MAX_TURNS: String
@@ -55,6 +58,7 @@ module MiniAgent
     def allow_unsafe?: () -> bool
     def chat_uri: () -> URI::Generic
     def models_uri: () -> URI::Generic
+    def cwd: () -> String?
     def use_ssl?: () -> bool
   end
 
@@ -90,8 +94,9 @@ module MiniAgent
     end
 
     attr_reader timeout: Numeric
+    attr_reader cwd: String?
 
-    def initialize: (?timeout: Numeric, ?poll_interval: Numeric) -> void
+    def initialize: (?timeout: Numeric, ?poll_interval: Numeric, ?cwd: String?) -> void
     def call: (String command) -> Result
   end
 
@@ -196,6 +201,11 @@ module MiniAgent
     def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?project_context: String?) -> void
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def interactive: (?input: IO) -> Conversation
+  end
+
+  class ModelsCommand
+    def initialize: (config: Config, ui: UI) -> void
+    def call: () -> Integer
   end
 
   class CLI

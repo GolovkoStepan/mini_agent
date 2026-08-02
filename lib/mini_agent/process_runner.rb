@@ -19,16 +19,22 @@ module MiniAgent
       end
     end
 
-    def initialize(timeout: 120, poll_interval: 0.1)
+    def initialize(timeout: 120, poll_interval: 0.1, cwd: nil)
       @timeout = timeout
       @poll_interval = poll_interval
+      @cwd = cwd
     end
 
-    attr_reader :timeout
+    attr_reader :timeout, :cwd
 
     # Бросает MiniAgent::TimeoutError, если команда не уложилась в @timeout.
+    #
+    # Каталог задаётся через chdir: у самого процесса, а не Dir.chdir: тот
+    # меняет каталог всего агента, а значит и то, куда пишет лог и где ищется
+    # описание проекта. Побочный эффект на весь процесс ради одной команды —
+    # обмен, которого здесь не нужно.
     def call(command)
-      Open3.popen3("bash", "-c", command) do |stdin, stdout_io, stderr_io, wait_thr|
+      Open3.popen3("bash", "-c", command, **spawn_options) do |stdin, stdout_io, stderr_io, wait_thr|
         stdin.close
         out_reader = Thread.new { stdout_io.read }
         err_reader = Thread.new { stderr_io.read }
@@ -44,6 +50,10 @@ module MiniAgent
     end
 
     private
+
+    def spawn_options
+      @cwd ? { chdir: @cwd } : {}
+    end
 
     def wait_or_kill(wait_thr, out_reader, err_reader)
       deadline = monotonic_now + @timeout
