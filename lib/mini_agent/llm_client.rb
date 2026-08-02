@@ -21,6 +21,7 @@ module MiniAgent
       @ui = ui
       @sleeper = sleeper
       @http = nil
+      @retry_after = nil
     end
 
     # Держит одно соединение на всё время работы блока.
@@ -98,12 +99,11 @@ module MiniAgent
 
     # nil означает «попытка неудачна, нужен повтор»; причина кладётся
     # в @last_reason, чтобы не плодить возвращаемых значений.
+    #
+    # Неповторяемый HTTP-код бросает LLMError прямо отсюда: возвращать nil
+    # значило бы отправить запрос на повтор, а именно этого делать нельзя.
     def interpret(response, attempt)
-      unless response.is_a?(Net::HTTPSuccess)
-        @ui&.error(format(Messages::HTTP_ERROR, code: response.code, attempt: attempt + 1))
-        @last_reason = "HTTP #{response.code}: #{utf8(response.body)}"
-        return nil
-      end
+      return handle_http_error(response, attempt) unless response.is_a?(Net::HTTPSuccess)
 
       data = JSON.parse(response.body)
       message = extract_message(data)
@@ -116,11 +116,20 @@ module MiniAgent
       nil
     end
 
-    # Net::HTTP отдаёт тело как ASCII-8BIT, если сервер не прислал charset.
-    # Склейка такой строки с русским текстом сообщения об ошибке роняет всё
-    # с Encoding::CompatibilityError — причём вместо самой ошибки от сервера.
-    def utf8(text)
-      text.to_s.dup.force_encoding(Encoding::UTF_8).scrub
+    # Повторяемый код — nil и обычный цикл повторов; неповторяемый — сразу
+    # LLMError, чтобы не ждать retry_delay ради заведомо того же ответа.
+    def handle_http_error(response, attempt)
+      error = ErrorResponse.new(response)
+
+      unless error.retriable?
+        @ui&.error(format(Messages::HTTP_FATAL, code: error.code))
+        raise LLMError, error.to_s
+      end
+
+      @ui&.error(format(Messages::HTTP_ERROR, code: error.code, attempt: attempt + 1))
+      @last_reason = error.to_s
+      @retry_after = error.retry_after
+      nil
     end
 
     def extract_message(data)
@@ -161,8 +170,13 @@ module MiniAgent
       @ui.with_spinner(&)
     end
 
+    # Retry-After от сервера перебивает настроенную задержку: он знает, когда
+    # освободится, а мы только гадаем. Значение одноразовое — иначе задержка
+    # от давнего 429 тянулась бы через все последующие повторы.
     def pause
-      @sleeper.call(@config.retry_delay) if @config.retry_delay.positive?
+      delay = @retry_after || @config.retry_delay
+      @retry_after = nil
+      @sleeper.call(delay) if delay.positive?
     end
   end
 end

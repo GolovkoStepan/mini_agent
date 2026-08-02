@@ -148,6 +148,18 @@ module MiniAgent
     def with_spinner: [T] () { () -> T } -> T
   end
 
+  class ErrorResponse
+    RETRIABLE_STATUS: Array[Integer]
+    MAX_RETRY_AFTER: Integer
+
+    def initialize: (untyped response) -> void
+    def code: () -> String
+    def retriable?: () -> bool
+    def retry_after: () -> Float?
+    def text: () -> String
+    def to_s: () -> String
+  end
+
   class LLMClient
     RETRIABLE: Array[Class]
     OPEN_TIMEOUT: Integer

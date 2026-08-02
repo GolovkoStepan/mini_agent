@@ -121,10 +121,111 @@ RSpec.describe MiniAgent::LLMClient do
       expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /должно быть первым/)
     end
 
+    # Ошибка запроса не станет успехом на второй попытке: повтор только
+    # платит retry_delay за тот же самый ответ.
+    it "не повторяет запрос при HTTP 400" do
+      stub_request(:post, endpoint).to_return(status: 400, body: "bad request")
+
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /400/)
+      expect(a_request(:post, endpoint)).to have_been_made.once
+    end
+
+    it "не повторяет запрос при HTTP 401" do
+      stub_request(:post, endpoint).to_return(status: 401, body: "unauthorized")
+
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /401/)
+      expect(a_request(:post, endpoint)).to have_been_made.once
+    end
+
+    it "не повторяет запрос при HTTP 404" do
+      stub_request(:post, endpoint).to_return(status: 404, body: "model not found")
+
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /404/)
+      expect(a_request(:post, endpoint)).to have_been_made.once
+    end
+
+    # 429 — исключение среди 4xx: сервер занят, а не запрос плох.
+    it "повторяет запрос при HTTP 429" do
+      stub_request(:post, endpoint)
+        .to_return(status: 429, body: "slow down").then
+        .to_return(status: 200, body: chat_response)
+
+      expect(client.chat(messages).first).to eq("готово")
+      expect(a_request(:post, endpoint)).to have_been_made.twice
+    end
+
+    # Сообщение об ошибке достаём из error.message: сырой JSON в консоли
+    # читать невозможно, а именно это поле сервер заполняет осмысленно.
+    it "показывает текст из поля error.message" do
+      body = { error: { message: "Модель qwen не загружена", type: "invalid_request_error" } }.to_json
+      stub_request(:post, endpoint).to_return(status: 400, body: body)
+
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /Модель qwen не загружена/)
+    end
+
     it "не падает на невалидных байтах в теле ошибки" do
       stub_request(:post, endpoint).to_return(status: 400, body: "bad \xFF\xFE byte".dup.force_encoding(Encoding::BINARY))
 
       expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /400/)
+    end
+
+    # Сервер знает, когда освободится, а настроенная задержка — только догадка.
+    it "ждёт время из заголовка Retry-After вместо настроенной задержки" do
+      slept = []
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
+      stub_request(:post, endpoint)
+        .to_return(status: 429, headers: { "Retry-After" => "5" }).then
+        .to_return(status: 200, body: chat_response)
+
+      client.chat(messages)
+
+      expect(slept).to eq([5.0])
+    end
+
+    # Иначе задержка от давнего 429 тянулась бы через все следующие повторы.
+    it "не переносит Retry-After на последующие попытки" do
+      slept = []
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
+      stub_request(:post, endpoint)
+        .to_return(status: 429, headers: { "Retry-After" => "5" }).then
+        .to_return(status: 500).then
+        .to_return(status: 200, body: chat_response)
+
+      client.chat(messages)
+
+      expect(slept).to eq([5.0, 2.0])
+    end
+
+    # Сервер вправе попросить и час, но агент интерактивный: молчаливое
+    # ожидание неотличимо от зависания.
+    it "ограничивает Retry-After потолком" do
+      slept = []
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
+      stub_request(:post, endpoint)
+        .to_return(status: 429, headers: { "Retry-After" => "3600" }).then
+        .to_return(status: 200, body: chat_response)
+
+      client.chat(messages)
+
+      expect(slept).to eq([MiniAgent::ErrorResponse::MAX_RETRY_AFTER.to_f])
+    end
+
+    # HTTP-дата в Retry-After спецификацией допустима, но локальные серверы
+    # её не шлют — разбирать её значило бы тянуть зависимость от времени.
+    it "игнорирует Retry-After в формате даты" do
+      slept = []
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
+      stub_request(:post, endpoint)
+        .to_return(status: 429, headers: { "Retry-After" => "Wed, 21 Oct 2026 07:28:00 GMT" }).then
+        .to_return(status: 200, body: chat_response)
+
+      client.chat(messages)
+
+      expect(slept).to eq([2.0])
     end
 
     it "уважает настроенное число попыток" do
