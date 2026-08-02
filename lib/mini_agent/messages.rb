@@ -169,6 +169,9 @@ module MiniAgent
     CMD_TOOL_LINE = "  %<name>s"
     CMD_CLEARED = "История очищена."
     CMD_UNKNOWN = "Неизвестная команда: /%<name>s. /help — список."
+    # Ctrl+C прерывает задачу, а не сессию: история цела, можно продолжать.
+    TASK_INTERRUPTED = "Прервано. История сохранена."
+    INTERRUPT_HINT = "Ещё раз Ctrl+C — выход, или /exit."
     INTERRUPTED = "\nВыход по Ctrl+C"
     # --- Список моделей ---
     MODELS_HEADER = "Модели на %<url>s:"

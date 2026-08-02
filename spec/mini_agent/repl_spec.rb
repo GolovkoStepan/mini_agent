@@ -48,6 +48,54 @@ RSpec.describe MiniAgent::Repl do
     end
   end
 
+  describe "Ctrl+C на приглашении" do
+    # Читатель, отдающий Interrupt вместо строки: ровно так ведёт себя
+    # Reline, когда пользователь жмёт Ctrl+C посреди набора.
+    def reader_raising(*script)
+      steps = script.dup
+      reader = instance_double(MiniAgent::LineReader)
+      allow(reader).to receive(:gets) do
+        step = steps.shift
+        raise Interrupt if step == :interrupt
+
+        step
+      end
+      reader
+    end
+
+    def repl_with(reader)
+      described_class.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader)
+    end
+
+    it "первый Ctrl+C не выходит, а подсказывает" do
+      allow(client).to receive(:chat)
+
+      repl_with(reader_raising(:interrupt, nil)).run
+
+      expect(out.string).to include("Ещё раз Ctrl+C — выход")
+      expect(out.string).to include("До свидания!")
+    end
+
+    it "второй Ctrl+C подряд выходит" do
+      allow(client).to receive(:chat)
+
+      repl_with(reader_raising(:interrupt, :interrupt, "не дойдёт\n")).run
+
+      expect(out.string).to include("До свидания!")
+      expect(client).not_to have_received(:chat)
+    end
+
+    # Две отмены, разделённые работой, — это не намерение выйти.
+    it "сбрасывает счётчик после обычной строки" do
+      allow(client).to receive(:chat).and_return(["ответ", []])
+
+      repl_with(reader_raising(:interrupt, "задача\n", :interrupt, nil)).run
+
+      expect(client).to have_received(:chat).once
+      expect(out.string.scan("Ещё раз Ctrl+C").size).to eq(2)
+    end
+  end
+
   describe "команды" do
     it "не отдаёт команды модели" do
       allow(client).to receive(:chat)

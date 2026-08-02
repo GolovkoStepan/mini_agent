@@ -97,6 +97,46 @@ RSpec.describe MiniAgent::ProcessRunner do
     end
   end
 
+  # Ctrl+C во время команды. Проверяется настоящим процессом: смысл целиком
+  # в том, переживёт ли он прерывание, а заглушка об этом ничего не скажет.
+  describe "прерывание" do
+    subject(:runner) { described_class.new(timeout: 10, poll_interval: 0.02) }
+
+    it "пробрасывает Interrupt наверх" do
+      interrupter = Thread.new do
+        sleep 0.3
+        Thread.main.raise(Interrupt)
+      end
+
+      expect { runner.call("sleep 5") }.to raise_error(Interrupt)
+    ensure
+      interrupter&.join
+    end
+
+    # Команда перехватывает INT и продолжает работу: сигнала от терминала ей
+    # мало, нужен явный KILL — иначе она допишет файл уже после прерывания.
+    it "убивает процесс, переживший сигнал" do
+      marker = File.join(Dir.tmpdir, "mini_agent_int_#{Process.pid}.txt")
+      FileUtils.rm_f(marker)
+      interrupter = Thread.new do
+        sleep 0.4
+        Thread.main.raise(Interrupt)
+      end
+
+      begin
+        runner.call("trap '' INT; sleep 1; echo дожил > #{marker}")
+      rescue Interrupt
+        # ожидаемо
+      end
+      interrupter.join
+      sleep 1.5 # даём время «выжившему» процессу дописать файл
+
+      expect(File.exist?(marker)).to be(false)
+    ensure
+      FileUtils.rm_f(marker)
+    end
+  end
+
   # Если читать stdout и stderr последовательно, команда с большим выводом
   # заблокируется на переполненном буфере пайпа и рантайм зависнет.
   it "не впадает в дедлок при выводе больше буфера пайпа" do

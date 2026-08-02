@@ -67,6 +67,16 @@ module MiniAgent
         err_reader.join
         raise TimeoutError, format(Messages::EXECUTION_TIMEOUT, timeout: @timeout.round)
       end
+    # Ctrl+C во время команды: процесс надо убить явно и здесь. Сигнал от
+    # терминала уходит группе, но команда могла сменить группу сама
+    # (`setsid`) или перехватить INT и продолжить работу — тогда без KILL
+    # она пережила бы прерывание и осталась висеть в фоне. Ровно та же
+    # причина, по которой здесь не используется Timeout.timeout.
+    rescue Interrupt
+      kill(wait_thr.pid)
+      out_reader.join
+      err_reader.join
+      raise
     end
 
     def kill(pid)

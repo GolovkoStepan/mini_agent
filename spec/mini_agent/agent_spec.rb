@@ -180,6 +180,59 @@ RSpec.describe MiniAgent::Agent do
     end
   end
 
+  describe "прерывание по Ctrl+C" do
+    # Interrupt не StandardError, поэтому rescue внутри цикла его не ловят
+    # и он доходит до обработчика вокруг всего хода.
+    it "прерывает задачу, а не роняет агента" do
+      allow(client).to receive(:chat).and_raise(Interrupt)
+
+      conversation = nil
+      expect { conversation = agent.run("задача") }.not_to raise_error
+      expect(out.string).to include("Прервано")
+    end
+
+    it "сохраняет историю: диалог можно продолжить" do
+      allow(client).to receive(:chat).and_raise(Interrupt)
+
+      conversation = agent.run("задача")
+
+      expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user])
+    end
+
+    # Прерывается задача целиком, а не один запрос: первый ход прошёл
+    # нормально, на втором пришёл Ctrl+C — третьего быть не должно,
+    # хотя max_turns это позволяет.
+    it "не идёт на следующий ход после прерывания" do
+      responses = [["работаю", [tool_call]]]
+      allow(client).to receive(:chat) do
+        raise Interrupt if responses.empty?
+
+        responses.shift
+      end
+
+      agent.run("задача")
+
+      expect(client).to have_received(:chat).twice
+    end
+
+    it "прерывание во время команды не роняет агента" do
+      angry = Class.new do
+        def name = "angry"
+        def schema = {}
+        def call(_arguments) = raise(Interrupt)
+      end.new
+      call = { "id" => "c1", "function" => { "name" => "angry", "arguments" => "{}" } }
+      allow(client).to receive(:chat).and_return(["сейчас", [call]])
+
+      agent = described_class.new(
+        config: config, client: client, tools: MiniAgent::ToolRegistry.new([angry]), ui: ui
+      )
+
+      expect { agent.run("задача") }.not_to raise_error
+      expect(out.string).to include("Прервано")
+    end
+  end
+
   describe "ошибки связи" do
     it "возвращает историю, а не бросает исключение" do
       allow(client).to receive(:chat).and_raise(MiniAgent::LLMError, "сеть недоступна")

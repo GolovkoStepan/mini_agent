@@ -30,6 +30,12 @@ module MiniAgent
       conversation ||= Conversation.new(project_context: @project_context)
       conversation.user(user_message) if user_message
 
+      interrupted(conversation) { turns(conversation) }
+    end
+
+    private
+
+    def turns(conversation)
       @config.max_turns.times do |index|
         # Номер хода виден только в спиннере и стирается вместе с ним:
         # в логе работы эта бухгалтерия не нужна.
@@ -49,13 +55,26 @@ module MiniAgent
       summarize(conversation)
     end
 
-    private
-
     def request(conversation, tool_choice: "auto")
       @client.chat(conversation.to_a, tools: @tools.schemas, tool_choice: tool_choice)
     rescue StandardError => e
       @ui.error(format(Messages::LLM_CONNECTION_FAILED, message: e.message))
       nil
+    end
+
+    # Ctrl+C во время ожидания модели или выполнения команды прерывает задачу,
+    # но не сессию: история остаётся, и в интерактивном режиме можно
+    # продолжить. Interrupt не StandardError, поэтому rescue выше его не
+    # перехватывают и он доходит сюда.
+    #
+    # Ловится вокруг всего цикла, а не вокруг одного запроса: прервать
+    # полагается задачу целиком, иначе агент пошёл бы на следующий ход как
+    # ни в чём не бывало.
+    def interrupted(conversation)
+      yield
+    rescue Interrupt
+      @ui.warn(Messages::TASK_INTERRUPTED)
+      conversation
     end
 
     # Отдельного «готово» не печатаем: финальный ответ модели уже показан

@@ -23,7 +23,9 @@ module MiniAgent
       conversation = new_conversation
 
       loop do
-        line = @reader.gets("\n#{Messages::PROMPT_SIGN}")
+        line = read_line
+        break if line == :exit
+        next if line == :retry
         break if line.nil? # Ctrl+D
 
         task = line.chomp
@@ -40,6 +42,29 @@ module MiniAgent
     end
 
     private
+
+    # Ctrl+C на приглашении: первый раз бросает набранную строку и печатает
+    # подсказку, второй подряд — выходит. Одиночный Ctrl+C выходом не делаем
+    # намеренно: в интерактивном режиме им обычно отменяют начатую мысль,
+    # и потерять из-за этого всю историю диалога — не то, чего ждут.
+    #
+    # Счётчик сбрасывается любой другой строкой: два Ctrl+C, разделённые
+    # работой, — это две разные отмены, а не намерение выйти.
+    # Пустая строка печатается отдельно, а не входит в приглашение: Reline
+    # считает промпт одной строкой и рисует "\n" литералом («\n> »).
+    def read_line
+      @ui.puts("")
+      line = @reader.gets(Messages::PROMPT_SIGN)
+      @interrupts = 0
+      line
+    rescue Interrupt
+      @interrupts = @interrupts.to_i + 1
+      return :exit if @interrupts >= 2
+
+      @ui.puts("")
+      @ui.warn(Messages::INTERRUPT_HINT)
+      :retry
+    end
 
     # Возвращает историю для следующей итерации либо :exit.
     def handle(task, conversation)
