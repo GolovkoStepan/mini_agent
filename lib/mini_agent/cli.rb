@@ -10,6 +10,11 @@ module MiniAgent
     EXIT_OK = 0
     EXIT_USAGE = 1
     EXIT_CONNECT = 2
+    # Соединение открылось, но запрос к модели провалился и задача не сделана.
+    # Отдельно от EXIT_CONNECT: там сервера нет вовсе, здесь он ответил отказом
+    # (например, HTTP 400 по переполненному контексту). Без этого кода агент
+    # возвращал 0, ничего не выполнив, и скрипт-обёртка считал задачу успешной.
+    EXIT_LLM = 3
 
     # Ошибки открытия соединения: сервер не отвечает, не запущен, недоступен.
     # Ловятся отдельно от ошибок самих запросов (те обрабатывает Agent#request),
@@ -80,7 +85,10 @@ module MiniAgent
       task = args.join(" ").strip
       return usage(parser) if task.empty?
 
-      with_connection(config, ui) { |agent| agent.run(task) }
+      with_connection(config, ui) do |agent|
+        agent.run(task)
+        agent.failed? ? EXIT_LLM : EXIT_OK
+      end
     end
 
     # Reline получает те же потоки, что и весь остальной ввод-вывод CLI:
@@ -89,14 +97,16 @@ module MiniAgent
       with_connection(config, ui) do |agent, tools|
         reader = LineReader.new(input: @input, output: @out)
         Repl.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader).run
+        # Провал отдельной задачи — не провал сессии: код относится ко всему
+        # сеансу, а пользователь ошибку уже увидел и мог продолжить работу.
+        EXIT_OK
       end
     end
 
+    # Код возврата приходит из блока: разовая задача отличает провал запроса
+    # от успеха, интерактивный режим всегда отдаёт EXIT_OK.
     def with_connection(config, ui, &)
-      connecting(config, ui) do
-        with_agent(config, ui, &)
-        EXIT_OK
-      end
+      connecting(config, ui) { with_agent(config, ui, &) }
     end
 
     # Соединение не открылось — показываем адрес и как его сменить вместо

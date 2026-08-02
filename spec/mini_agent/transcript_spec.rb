@@ -105,4 +105,20 @@ RSpec.describe MiniAgent::Transcript do
         .to raise_error(MiniAgent::ConfigError, /Не удалось открыть журнал/)
     end
   end
+
+  # Ход, снятый с истории, из журнала не вычёркивается: он протоколирует то,
+  # что действительно уходило модели. Иначе по логу нельзя было бы понять,
+  # на каком именно сообщении запрос упал.
+  describe "откат хода" do
+    it "отмечает откат отдельной записью, сохраняя снятые сообщения" do
+      log = described_class.new(path)
+      log.message({ role: "user", content: "упавшая задача" })
+      log.rollback(1)
+      log.close
+
+      expect(records.map { |r| r["type"] }).to eq(%w[message rollback])
+      expect(records.first["content"]).to eq("упавшая задача")
+      expect(records.last["removed"]).to eq(1)
+    end
+  end
 end

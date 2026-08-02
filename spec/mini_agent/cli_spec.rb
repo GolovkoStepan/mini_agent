@@ -176,6 +176,35 @@ RSpec.describe MiniAgent::CLI do
       end
     end
 
+    # Сервер ответил отказом: соединение открылось, но задача не сделана.
+    # Живой случай — HTTP 400 «превышен размер контекста»: агент печатал
+    # ошибку и выходил с нулём, и обёртка считала задачу выполненной.
+    describe "провал запроса к модели" do
+      before do
+        stub_request(:post, endpoint).to_return(
+          status: 400,
+          body: { "error" => { "message" => "request exceeds the available context size" } }.to_json
+        )
+      end
+
+      it "возвращает код 3, а не 0" do
+        code = start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(code).to eq(3)
+      end
+
+      it "печатает причину отказа" do
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(out.string).to include("context size")
+      end
+
+      # Код 2 закреплён за «сервера нет вовсе» — эти случаи не сливаются.
+      it "не путается с кодом недоступного сервера" do
+        expect(MiniAgent::CLI::EXIT_LLM).not_to eq(MiniAgent::CLI::EXIT_CONNECT)
+      end
+    end
+
     describe "контекст проекта" do
       it "подмешивает описание проекта в системный промпт" do
         allow(MiniAgent::ProjectContext).to receive(:new).and_return(
@@ -364,6 +393,16 @@ RSpec.describe MiniAgent::CLI do
 
     it "завершается сразу при пустом вводе" do
       expect(start(["-i", "--base-url", "http://cli.test/v1"], input: StringIO.new(""))).to eq(0)
+    end
+
+    # Провал одной задачи — не провал сессии: пользователь ошибку увидел,
+    # мог уточнить задачу и продолжить, а код относится ко всему сеансу.
+    it "остаётся нулём даже после неудачной задачи" do
+      stub_request(:post, "http://cli.test/v1/chat/completions").to_return(status: 400, body: "{}")
+
+      code = start(["-i", "--base-url", "http://cli.test/v1"], input: StringIO.new("задача\nexit\n"))
+
+      expect(code).to eq(0)
     end
   end
 end

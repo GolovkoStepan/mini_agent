@@ -78,6 +78,7 @@ module MiniAgent
     def path: () -> String
     def session: (Config config) -> void
     def message: (message) -> void
+    def rollback: (Integer count) -> void
     def close: () -> void
   end
 
@@ -99,6 +100,8 @@ module MiniAgent
     def last: () -> message?
     def size: () -> Integer
     def empty?: () -> bool
+    def mark: () -> Integer
+    def rollback: (Integer mark) -> Integer
     def self.tool_call_id: (tool_call) -> String
   end
 
@@ -218,6 +221,7 @@ module MiniAgent
     def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History) -> void
     def new_conversation: () -> Conversation
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
+    def failed?: () -> bool
   end
 
   class AgentBuilder
@@ -254,6 +258,7 @@ module MiniAgent
     EXIT_OK: Integer
     EXIT_USAGE: Integer
     EXIT_CONNECT: Integer
+    EXIT_LLM: Integer
     FLAGS: Array[Array[untyped]]
     CONNECT_ERRORS: Array[Class]
 

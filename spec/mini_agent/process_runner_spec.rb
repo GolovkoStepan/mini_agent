@@ -135,6 +135,26 @@ RSpec.describe MiniAgent::ProcessRunner do
     ensure
       FileUtils.rm_f(marker)
     end
+
+    # Проверка именно на скорость возврата. Прошлая версия теста этого не
+    # ловила: там команда жила секунду, и зависание длиной в неё же выглядело
+    # нормой. Зависание тянется ровно столько, сколько живёт команда, поэтому
+    # брать надо заведомо долгую.
+    it "отдаёт управление сразу, а не ждёт конца команды" do
+      interrupter = Thread.new do
+        sleep 0.4
+        Thread.main.raise(Interrupt)
+      end
+
+      elapsed = measure do
+        expect { runner.call("trap '' INT; sleep 60") }.to raise_error(Interrupt)
+      end
+
+      expect(elapsed).to be < 5
+    ensure
+      interrupter&.join
+      system("pkill -f 'sleep 60' >/dev/null 2>&1")
+    end
   end
 
   # Вывод команды — произвольные байты. Ruby помечает его UTF-8, не проверяя
@@ -172,5 +192,69 @@ RSpec.describe MiniAgent::ProcessRunner do
     result = runner.call("yes ошибка | head -n 20000 >&2")
 
     expect(result.stderr.lines.size).to eq(20_000)
+  end
+
+  # Команда оставляет после себя живой фоновый процесс — обычное дело для
+  # `команда &` и для всего, что запускает демона. Он наследует конец пайпа,
+  # и пока он жив, EOF не приходит: без своей группы процессов и ограниченного
+  # ожидания агент вис ровно на время жизни этого потомка. Найдено живой
+  # проверкой; тесты пропускали это, потому что в них команда жила секунду.
+  # Защит здесь две, и проверяются они разными примерами. Убийство группы
+  # закреплено «отдаёт вывод» и «убивает потомков» — они падают, стоит вернуть
+  # KILL по одному pid. Ограниченное ожидание в drain закреплено замерами
+  # времени: они падают, только если снять и его, потому что оно и есть
+  # страховка на случай ускользнувшего потомка.
+  describe "команда с фоновым потомком" do
+    # Заведомо дольше любого разумного ожидания в этих тестах: если правка
+    # снята, замер упрётся в него, а не в реальное время работы.
+    let(:orphan) { "sleep 60" }
+
+    after { system("pkill -f '#{orphan}' >/dev/null 2>&1") }
+
+    it "возвращает управление сразу после выхода команды" do
+      elapsed = measure { runner.call("#{orphan} & echo готово") }
+
+      expect(elapsed).to be < 5
+    end
+
+    # Вывод не должен пропасть из-за того, что пайп остался открытым:
+    # IO#read ждал бы EOF и вернул пустую строку.
+    it "отдаёт вывод команды, а не теряет его" do
+      expect(runner.call("#{orphan} & echo привет").stdout).to eq("привет\n")
+    end
+
+    it "укладывается в таймаут, а не ждёт потомка" do
+      quick = described_class.new(timeout: 0.5)
+
+      elapsed = measure do
+        expect { quick.call("#{orphan} & wait") }.to raise_error(MiniAgent::TimeoutError)
+      end
+
+      expect(elapsed).to be < 5
+    end
+
+    # KILL по одному bash не достаёт его детей: убивать надо группу.
+    it "убивает потомков вместе с командой" do
+      marker = File.join(Dir.tmpdir, "mini_agent_orphan_#{Process.pid}.txt")
+      FileUtils.rm_f(marker)
+      quick = described_class.new(timeout: 0.5)
+
+      begin
+        quick.call("(sleep 1; echo дожил > #{marker}) & wait")
+      rescue MiniAgent::TimeoutError
+        # ожидаемо
+      end
+      sleep 2 # даём «выжившему» потомку время дописать файл
+
+      expect(File.exist?(marker)).to be(false)
+    ensure
+      FileUtils.rm_f(marker)
+    end
+  end
+
+  def measure
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    yield
+    Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   end
 end

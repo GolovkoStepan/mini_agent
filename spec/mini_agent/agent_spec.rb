@@ -234,13 +234,53 @@ RSpec.describe MiniAgent::Agent do
   end
 
   describe "ошибки связи" do
-    it "возвращает историю, а не бросает исключение" do
-      allow(client).to receive(:chat).and_raise(MiniAgent::LLMError, "сеть недоступна")
+    before { allow(client).to receive(:chat).and_raise(MiniAgent::LLMError, "сеть недоступна") }
 
+    it "возвращает историю, а не бросает исключение" do
       conversation = nil
       expect { conversation = agent.run("задача") }.not_to raise_error
-      expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user])
+      expect(conversation).to be_a(MiniAgent::Conversation)
       expect(out.string).to include("Ошибка связи с LLM")
+    end
+
+    # Задача не сделана, и это должно быть видно снаружи: по этому признаку
+    # CLI возвращает код 3 вместо нуля.
+    it "помечает задачу как проваленную" do
+      agent.run("задача")
+
+      expect(agent).to be_failed
+    end
+
+    # Неотвеченное user-сообщение валит и следующий запрос: при упоре
+    # в контекстное окно вся сессия оставалась мёртвой до /clear.
+    it "снимает с истории сообщения неудачного хода" do
+      conversation = agent.run("задача")
+
+      expect(conversation.to_a.map { |m| m[:role] }).to eq(["system"])
+      expect(out.string).to include("снят с истории")
+    end
+
+    it "не трогает то, что было в истории до задачи" do
+      history = agent.new_conversation
+      history.user("прошлая задача")
+      history.assistant("прошлый ответ")
+
+      agent.run("новая задача", conversation: history)
+
+      expect(history.to_a.map { |m| m[:role] }).to eq(%w[system user assistant])
+    end
+
+    # Следующая задача в той же сессии должна уходить уже без мусора,
+    # иначе откат бесполезен.
+    it "позволяет продолжить работу в той же истории" do
+      history = agent.new_conversation
+      agent.run("упавшая задача", conversation: history)
+
+      allow(client).to receive(:chat).and_return(["готово", []])
+      agent.run("следующая задача", conversation: history)
+
+      expect(agent).not_to be_failed
+      expect(history.to_a.map { |m| m[:role] }).to eq(%w[system user assistant])
     end
   end
 

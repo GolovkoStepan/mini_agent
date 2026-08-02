@@ -28,22 +28,33 @@ module MiniAgent
     # это позволяет интерактивному режиму продолжать диалог с накопленной
     # историей, передавая её обратно через conversation:.
     def run(user_message = nil, conversation: nil)
+      # Сбрасывается на каждой задаче: в интерактивном режиме провал одной
+      # не должен помечать всю сессию до самого выхода.
+      @failed = false
       conversation ||= new_conversation
+      mark = conversation.mark
       conversation.user(user_message) if user_message
 
-      interrupted(conversation) { turns(conversation) }
+      interrupted(conversation) { turns(conversation, mark) }
+    end
+
+    # Последняя задача провалилась — запрос к модели не удался. По этому
+    # признаку CLI отличает невыполненную задачу от выполненной: без него
+    # агент возвращал 0 даже когда не сделал ничего.
+    def failed?
+      @failed
     end
 
     private
 
-    def turns(conversation)
+    def turns(conversation, mark)
       @config.max_turns.times do |index|
         # Номер хода виден только в спиннере и стирается вместе с ним:
         # в логе работы эта бухгалтерия не нужна.
         @ui.status = format(Messages::TURN, number: index + 1, total: @config.max_turns)
 
         content, tool_calls = request(conversation)
-        return conversation if content.nil? # сетевая ошибка, история сохранена
+        return recover(conversation, mark) if content.nil?
 
         @ui.assistant(content) unless content.empty?
 
@@ -53,14 +64,25 @@ module MiniAgent
         tool_calls.each { |tool_call| handle_tool_call(conversation, tool_call) }
       end
 
-      summarize(conversation)
+      summarize(conversation, mark)
     end
 
     def request(conversation, tool_choice: "auto")
       @client.chat(conversation.to_a, tools: @tools.schemas, tool_choice: tool_choice)
     rescue StandardError => e
+      @failed = true
       @ui.error(format(Messages::LLM_CONNECTION_FAILED, message: e.message))
       nil
+    end
+
+    # Запрос не удался — снимаем с истории всё, что успела добавить эта задача.
+    # Иначе в ней остаётся мусор, который валит и следующий запрос: висящее
+    # user-сообщение без ответа, а при упоре в контекстное окно — ещё и не
+    # влезший туда результат инструмента. Без отката сессия оставалась мёртвой
+    # до /clear: проверено живьём, следующий вопрос до модели уже не доходил.
+    def recover(conversation, mark)
+      @ui.warn(Messages::TURN_ROLLED_BACK) if conversation.rollback(mark).positive?
+      conversation
     end
 
     # Ctrl+C во время ожидания модели или выполнения команды прерывает задачу,
@@ -134,14 +156,14 @@ module MiniAgent
     # Просьба идёт ролью user, а не system: шаблоны чата ряда моделей
     # (Qwen и другие) требуют, чтобы system-сообщение было только первым,
     # и отвечают HTTP 400 на system в середине истории.
-    def summarize(conversation)
+    def summarize(conversation, mark)
       @ui.warn(format(Messages::MAX_TURNS_REACHED, count: @config.max_turns))
       conversation.user(Messages::STOP_MAX_TURNS)
 
       content, = request(conversation, tool_choice: "none")
       if content.nil?
         @ui.error(format(Messages::SUMMARY_FAILED, message: ""))
-        return conversation
+        return recover(conversation, mark)
       end
 
       unless content.empty?

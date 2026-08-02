@@ -144,5 +144,18 @@ RSpec.describe MiniAgent::Repl do
 
       expect(conversation.to_a.first[:content]).to include("тесты: make spec")
     end
+
+    # Раньше упавшая задача оставляла в истории сообщение без ответа, и на
+    # переполненном контексте следующая падала тем же образом — сессия
+    # оставалась мёртвой до /clear. Теперь работать можно дальше.
+    it "продолжает сессию после неудачной задачи" do
+      responses = [-> { raise MiniAgent::LLMError, "переполнен контекст" }, -> { ["готово", []] }]
+      allow(client).to receive(:chat) { responses.shift.call }
+
+      conversation = repl("упавшая задача\nследующая задача\nexit\n").run
+
+      expect(out.string).to include("готово")
+      expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user assistant])
+    end
   end
 end

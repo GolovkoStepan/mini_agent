@@ -137,6 +137,51 @@ RSpec.describe MiniAgent::Conversation do
     it "без журнала работает как прежде" do
       expect { described_class.new(system_prompt: nil).user("задача") }.not_to raise_error
     end
+
+    # Журнал протоколирует то, что уходило модели, поэтому снятые сообщения
+    # из него не вычёркиваются — вместо этого появляется отметка об откате.
+    it "сообщает журналу об откате, а не переписывает его" do
+      conversation = described_class.new(system_prompt: nil, transcript: transcript)
+      mark = conversation.mark
+      conversation.user("задача")
+      conversation.assistant("ответ")
+
+      conversation.rollback(mark)
+
+      expect(transcript).to have_received(:message).exactly(2).times
+      expect(transcript).to have_received(:rollback).with(2)
+    end
+  end
+
+  describe "откат хода" do
+    it "снимает всё, что добавилось после отметки" do
+      conversation = described_class.new(system_prompt: "s")
+      mark = conversation.mark
+      conversation.user("задача")
+      conversation.assistant("ответ")
+
+      expect(conversation.rollback(mark)).to eq(2)
+      expect(conversation.to_a.map { |m| m[:role] }).to eq(["system"])
+    end
+
+    it "не трогает историю, если после отметки ничего не появилось" do
+      conversation = described_class.new(system_prompt: "s")
+
+      expect(conversation.rollback(conversation.mark)).to eq(0)
+      expect(conversation.size).to eq(1)
+    end
+
+    # После отката историей продолжают пользоваться — это и есть его смысл.
+    it "оставляет историю пригодной для продолжения" do
+      conversation = described_class.new(system_prompt: "s")
+      mark = conversation.mark
+      conversation.user("упавшая задача")
+      conversation.rollback(mark)
+
+      conversation.user("следующая задача")
+
+      expect(conversation.to_a.map { |m| m[:content] }).to eq(["s", "следующая задача"])
+    end
   end
 
   it "не даёт менять историю через возвращённый массив" do
