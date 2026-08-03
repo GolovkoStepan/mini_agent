@@ -85,11 +85,7 @@ module MiniAgent
     end
 
     def build_tools
-      guard = CommandGuard.new(
-        allow_unsafe: @config.allow_unsafe?,
-        prompt: prompt,
-        ui: @ui
-      )
+      guard = CommandGuard.new(policy: @config.policy, prompt: prompt, ui: @ui)
       runner = ProcessRunner.new(timeout: @config.timeout, cwd: @config.cwd)
       ToolRegistry.new([Tools::Bash.new(guard: guard, runner: runner)])
     end

@@ -36,6 +36,7 @@ module MiniAgent
       [:retry_delay, "--retry-delay N", Float, Messages::OPT_RETRY_DELAY],
       [:base_url, "--base-url URL", Messages::OPT_BASE_URL],
       [:model, "--model NAME", Messages::OPT_MODEL],
+      [:policy, "--policy NAME", Messages::OPT_POLICY],
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
       [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
       [:cwd, "--cwd DIR", Messages::OPT_CWD],

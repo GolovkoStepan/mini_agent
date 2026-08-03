@@ -29,6 +29,7 @@ end
 
 require_relative "mini_agent/process_runner"
 require_relative "mini_agent/prompt"
+require_relative "mini_agent/read_only"
 require_relative "mini_agent/command_guard"
 require_relative "mini_agent/tools/bash"
 require_relative "mini_agent/tool_registry"

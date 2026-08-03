@@ -28,6 +28,11 @@ module MiniAgent
       # умолчание здесь было бы выдумкой. Не знаем — так и говорим; спросить
       # сервер пробует WindowProbe.
       context_window: nil,
+      # Политика подтверждений. Умолчание — :deny (спрашивать только по
+      # денилисту): агента зовут работать, и на задаче вида «запусти тесты»
+      # строгая политика превращает её в череду подтверждений. Строгую
+      # включают осознанно, а не получают по умолчанию.
+      policy: :deny,
       allow_unsafe: false,
       timeout: 120,
       # Ожидание ответа модели. 120 секунд не хватало: на bonsai-27b (Q1_0,
@@ -59,6 +64,7 @@ module MiniAgent
       max_tokens: "MAX_TOKENS",
       context_window: "CONTEXT_WINDOW",
       llm_timeout: "LLM_TIMEOUT",
+      policy: "AGENT_POLICY",
       allow_unsafe: "ALLOW_UNSAFE",
       timeout: "COMMAND_TIMEOUT",
       cwd: "AGENT_CWD",
@@ -66,7 +72,7 @@ module MiniAgent
     }.freeze
 
     attr_reader :base_url, :api_key, :model, :max_turns,
-                :retry_count, :retry_delay, :max_tokens, :timeout, :llm_timeout, :cwd, :log
+                :retry_count, :retry_delay, :max_tokens, :timeout, :llm_timeout, :policy, :cwd, :log
 
     # Размер контекстного окна: число или nil, если он неизвестен.
     #
@@ -82,13 +88,17 @@ module MiniAgent
 
       read_connection
       read_limits
-      @allow_unsafe = to_bool(fetch(:allow_unsafe))
+      @policy = read_policy
       @cwd = expand_cwd(fetch(:cwd))
       @log = expand_log(fetch(:log))
     end
 
+    # Отдельного поля под этот признак нет: он и есть одна из политик.
+    # Держать рядом булев флаг и политику значило бы завести два источника
+    # одного решения — и первое же расхождение («allow_unsafe: true, но
+    # policy: :ask») пришлось бы разрешать угадыванием.
     def allow_unsafe?
-      @allow_unsafe
+      @policy == :unsafe
     end
 
     def chat_uri
@@ -132,6 +142,31 @@ module MiniAgent
 
       number = value.to_i
       number.positive? ? number : nil
+    end
+
+    # Политика подтверждений с учётом старого флага --allow-unsafe.
+    #
+    # Тот оставлен работать: он описан в README, живёт в чужих скриптах и
+    # означает ровно одну из политик. Явно названная политика его перебивает —
+    # иначе `--policy ask --allow-unsafe` разрешалось бы угадыванием, а из
+    # двух указаний верить надо более точному.
+    def read_policy
+      return :unsafe if to_bool(fetch(:allow_unsafe)) && !given?(:policy)
+
+      value = fetch(:policy).to_s.strip.downcase.to_sym
+      return value if CommandGuard::POLICIES.include?(value)
+
+      raise ConfigError, format(Messages::UNKNOWN_POLICY, value: fetch(:policy),
+                                                          known: CommandGuard::POLICIES.join(", "))
+    end
+
+    # Значение задано человеком, а не взято из умолчаний. Отличать нужно
+    # только политике: она сталкивается со вторым указанием того же смысла.
+    def given?(key)
+      return true if @options.key?(key) && !@options[key].nil?
+
+      value = @env[ENV_KEYS.fetch(key)]
+      !(value.nil? || value.empty?)
     end
 
     # options.key? вместо проверки на истинность: иначе явное false

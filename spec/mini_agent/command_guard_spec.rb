@@ -42,12 +42,21 @@ RSpec.describe MiniAgent::CommandGuard do
     end
   end
 
-  describe "#authorize?" do
+  describe "#authorize? при политике deny (умолчание)" do
     it "пропускает безопасную команду без вопросов" do
       prompt = instance_spy(MiniAgent::Prompt)
       guard = described_class.new(prompt: prompt)
 
       expect(guard.authorize?("ls -la")).to be(true)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    # Ровно то, чем deny отличается от ask: пишущая команда идёт молча.
+    it "пропускает пишущую команду без вопросов" do
+      prompt = instance_spy(MiniAgent::Prompt)
+      guard = described_class.new(prompt: prompt)
+
+      expect(guard.authorize?("bundle exec rspec")).to be(true)
       expect(prompt).not_to have_received(:confirm?)
     end
 
@@ -63,13 +72,6 @@ RSpec.describe MiniAgent::CommandGuard do
       expect(guard.authorize?("rm -rf /tmp/x")).to be(false)
     end
 
-    it "не спрашивает подтверждения при allow_unsafe" do
-      prompt = MiniAgent::Prompt.new(input: StringIO.new(""), output: StringIO.new)
-      guard = described_class.new(allow_unsafe: true, prompt: prompt)
-
-      expect(guard.authorize?("rm -rf /tmp/x")).to be(true)
-    end
-
     it "предупреждает через ui об опасной команде" do
       ui = spy("UI")
       guard = described_class.new(prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
@@ -78,13 +80,80 @@ RSpec.describe MiniAgent::CommandGuard do
 
       expect(ui).to have_received(:warn).with(/Опасная команда/)
     end
+  end
 
-    it "предупреждает при allow_unsafe, но не блокирует" do
+  describe "#authorize? при политике ask" do
+    def guard(prompt, ui: nil)
+      described_class.new(policy: :ask, prompt: prompt, ui: ui)
+    end
+
+    it "пропускает читающую команду без вопросов" do
+      prompt = instance_spy(MiniAgent::Prompt)
+
+      expect(guard(prompt).authorize?("cat README.md")).to be(true)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    it "спрашивает про пишущую команду" do
+      prompt = instance_spy(MiniAgent::Prompt)
+      allow(prompt).to receive(:confirm?).and_return(true)
+
+      expect(guard(prompt).authorize?("bundle exec rspec")).to be(true)
+      expect(prompt).to have_received(:confirm?)
+    end
+
+    it "запрещает пишущую команду при отказе" do
+      expect(guard(MiniAgent::Prompt::AutoDeny.new).authorize?("touch new.rb")).to be(false)
+    end
+
+    # Пишущая — не то же самое, что опасная, и слово «опасная» здесь было бы
+    # обесценено к тому моменту, когда понадобится по-настоящему.
+    it "не называет обычную пишущую команду опасной" do
       ui = spy("UI")
-      guard = described_class.new(allow_unsafe: true, prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
+
+      guard(MiniAgent::Prompt::AutoDeny.new, ui: ui).authorize?("mkdir tmp")
+
+      expect(ui).to have_received(:warn).with(/не только читает/)
+      expect(ui).not_to have_received(:warn).with(/Опасная/)
+    end
+
+    # Порядок проверок: денилист раньше списка читающих. Иначе добавление
+    # в список чего-нибудь вроде find пропустило бы опасную форму молча.
+    it "называет опасную команду опасной, а не просто пишущей" do
+      ui = spy("UI")
+
+      guard(MiniAgent::Prompt::AutoDeny.new, ui: ui).authorize?("sudo ls")
+
+      expect(ui).to have_received(:warn).with(/Опасная команда/)
+    end
+  end
+
+  describe "#authorize? при политике unsafe" do
+    it "не спрашивает подтверждения об опасной команде" do
+      prompt = instance_spy(MiniAgent::Prompt)
+      guard = described_class.new(policy: :unsafe, prompt: prompt)
+
+      expect(guard.authorize?("rm -rf /tmp/x")).to be(true)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    it "предупреждает об опасной команде, но не блокирует" do
+      ui = spy("UI")
+      guard = described_class.new(policy: :unsafe, prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
 
       expect(guard.authorize?("sudo ls")).to be(true)
-      expect(ui).to have_received(:warn).with(/ALLOW_UNSAFE/)
+      expect(ui).to have_received(:warn).with(/policy unsafe/)
+    end
+
+    # Человек уже сказал, что обычные команды его не интересуют: строка
+    # на каждый ls превратила бы пометку в шум, за которым не видно настоящей.
+    it "молчит об обычной команде" do
+      ui = spy("UI")
+      guard = described_class.new(policy: :unsafe, prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
+
+      guard.authorize?("mkdir tmp")
+
+      expect(ui).not_to have_received(:warn)
     end
   end
 end

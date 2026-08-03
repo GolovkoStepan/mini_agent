@@ -54,6 +54,7 @@ module MiniAgent
     attr_reader max_tokens: Integer
     attr_reader timeout: Float
     attr_reader llm_timeout: Float
+    attr_reader policy: Symbol
     attr_accessor context_window: Integer?
 
     def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
@@ -203,10 +204,20 @@ module MiniAgent
     end
   end
 
+  module ReadOnly
+    COMMANDS: Array[String]
+    GIT_SUBCOMMANDS: Array[String]
+    UNPARSEABLE: Regexp
+    SEPARATORS: Regexp
+
+    def self.command?: (String? command) -> bool
+  end
+
   class CommandGuard
     DANGEROUS_PATTERNS: Array[Regexp]
+    POLICIES: Array[Symbol]
 
-    def initialize: (?allow_unsafe: bool, ?prompt: untyped, ?ui: UI?) -> void
+    def initialize: (?policy: Symbol, ?prompt: untyped, ?ui: UI?) -> void
     def self.dangerous?: (String command) -> bool
     def authorize?: (String command) -> bool
   end

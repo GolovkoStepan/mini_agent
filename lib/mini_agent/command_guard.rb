@@ -1,14 +1,27 @@
 # frozen_string_literal: true
 
 module MiniAgent
-  # Проверка команд на очевидно разрушительные конструкции.
+  # Что выполнять молча, а что спрашивать.
   #
-  # ВАЖНО ПОНИМАТЬ ГРАНИЦЫ. Это денилист регулярных выражений поверх строки,
-  # которую составляет сама модель. Он ловит случайный `rm -rf` и опечатки,
-  # но песочницей не является: тривиальное переписывание команды
-  # (переменные, кавычки, base64) обходит любой такой список. Не полагайтесь
-  # на него как на границу безопасности при работе с недоверенной моделью.
+  # ВАЖНО ПОНИМАТЬ ГРАНИЦЫ. Здесь два списка поверх строки, которую составляет
+  # сама модель: денилист заведомо разрушительного (DANGEROUS_PATTERNS) и
+  # список заведомо читающего (ReadOnly). Оба — фильтры, а не песочница:
+  # тривиальное переписывание команды (переменные, кавычки, base64) обходит
+  # любой такой список. Не полагайтесь на них как на границу безопасности при
+  # работе с недоверенной моделью.
+  #
+  # Политика выбирает, как поступать с тем, что не попало ни в один список:
+  #
+  #   :deny   — выполнять молча. Спрашиваем только по денилисту (умолчание).
+  #   :ask    — спрашивать. Молча идёт только заведомо читающее.
+  #   :unsafe — выполнять всё, про денилист лишь предупреждать.
+  #
+  # Умолчанием оставлен :deny, а не :ask: агента зовут работать, и на первой
+  # же задаче вида «запусти тесты» строгая политика превращает работу в череду
+  # подтверждений. Кто хочет её — включает флагом осознанно.
   class CommandGuard
+    POLICIES = %i[deny ask unsafe].freeze
+
     DANGEROUS_PATTERNS = [
       /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, # rm -rf, rm -r -f, rm --force
       /\bsudo\b/,
@@ -23,8 +36,8 @@ module MiniAgent
       /:\(\)\s*\{\s*:\|\s*:&\s*\}\s*;\s*:/ # форк-бомба
     ].freeze
 
-    def initialize(allow_unsafe: false, prompt: Prompt.new, ui: nil)
-      @allow_unsafe = allow_unsafe
+    def initialize(policy: :deny, prompt: Prompt.new, ui: nil)
+      @policy = policy
       @prompt = prompt
       @ui = ui
     end
@@ -34,20 +47,35 @@ module MiniAgent
     end
 
     # true — команду можно выполнять.
+    #
+    # Порядок ветвлений существен. Денилист проверяется раньше списка
+    # читающих: у команды с подстановкой или перенаправлением ReadOnly и так
+    # ответит «нет», но полагаться на это нельзя — при добавлении в список
+    # чего-нибудь вроде `find` опасная форма прошла бы молча.
     def authorize?(command)
-      return true unless self.class.dangerous?(command)
+      dangerous = self.class.dangerous?(command)
 
-      if @allow_unsafe
-        warn_only(command)
+      if @policy == :unsafe
+        warn_only(command) if dangerous
         return true
       end
 
-      @ui&.warn(format(Messages::DANGEROUS_COMMAND, command: command))
-      @prompt.confirm?(Messages::CONFIRM_PROMPT)
+      return confirm?(Messages::DANGEROUS_COMMAND, command) if dangerous
+      return true if @policy == :deny || ReadOnly.command?(command)
+
+      confirm?(Messages::WRITING_COMMAND, command)
     end
 
     private
 
+    def confirm?(warning, command)
+      @ui&.warn(format(warning, command: command))
+      @prompt.confirm?(Messages::CONFIRM_PROMPT)
+    end
+
+    # Предупреждаем только об опасном: при :unsafe человек уже сказал, что
+    # обычные команды его не интересуют, и строка на каждый `ls` из полезной
+    # пометки превратилась бы в шум, за которым не видно настоящей.
     def warn_only(command)
       @ui&.warn(format(Messages::DANGEROUS_COMMAND_ALLOWED, command: command))
     end

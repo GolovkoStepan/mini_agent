@@ -63,6 +63,62 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  describe "#policy" do
+    it "по умолчанию deny" do
+      expect(described_class.new({}, env: {}).policy).to eq(:deny)
+    end
+
+    it "читается из опции" do
+      expect(described_class.new({ policy: "ask" }, env: {}).policy).to eq(:ask)
+    end
+
+    it "читается из AGENT_POLICY" do
+      expect(described_class.new({}, env: { "AGENT_POLICY" => "unsafe" }).policy).to eq(:unsafe)
+    end
+
+    it "не зависит от регистра и пробелов" do
+      expect(described_class.new({ policy: " ASK " }, env: {}).policy).to eq(:ask)
+    end
+
+    # Молча откатываться к умолчанию нельзя: опечатка в --policy asl означала
+    # бы тихую работу с чужой политикой, а весь смысл флага — в том, какая
+    # именно выбрана.
+    it "падает с ConfigError на неизвестном значении" do
+      expect { described_class.new({ policy: "asl" }, env: {}) }
+        .to raise_error(MiniAgent::ConfigError, /asl/)
+    end
+
+    # Старый флаг остаётся рабочим: он описан в README и живёт в чужих
+    # скриптах, а означает ровно одну из политик.
+    it "выводится из ALLOW_UNSAFE=true" do
+      expect(described_class.new({}, env: { "ALLOW_UNSAFE" => "true" }).policy).to eq(:unsafe)
+    end
+
+    it "выводится из --allow-unsafe" do
+      expect(described_class.new({ allow_unsafe: true }, env: {}).policy).to eq(:unsafe)
+    end
+
+    # Из двух указаний одного смысла верим более точному.
+    it "названная политика перебивает --allow-unsafe" do
+      config = described_class.new({ allow_unsafe: true, policy: "ask" }, env: {})
+
+      expect(config.policy).to eq(:ask)
+      expect(config.allow_unsafe?).to be(false)
+    end
+
+    it "названная политика перебивает ALLOW_UNSAFE из окружения" do
+      config = described_class.new({}, env: { "ALLOW_UNSAFE" => "true", "AGENT_POLICY" => "deny" })
+
+      expect(config.policy).to eq(:deny)
+    end
+
+    # allow_unsafe? не отдельное поле, а вопрос к политике: два источника
+    # одного решения разошлись бы при первом же несогласованном наборе флагов.
+    it "согласован с allow_unsafe?" do
+      expect(described_class.new({ policy: "unsafe" }, env: {}).allow_unsafe?).to be(true)
+    end
+  end
+
   describe "#chat_uri" do
     it "собирает адрес эндпоинта из base_url" do
       config = described_class.new({ base_url: "http://localhost:1234/v1" }, env: {})

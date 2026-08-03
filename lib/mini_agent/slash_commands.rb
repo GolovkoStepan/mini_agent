@@ -124,6 +124,7 @@ module MiniAgent
       @ui.puts(format(Messages::CMD_SERVER_LINE, url: @config.base_url))
       @ui.puts(format(Messages::CMD_WINDOW_LINE, size: window_size))
       @ui.puts(format(Messages::CMD_CWD_LINE, path: @config.cwd || Dir.pwd))
+      @ui.puts(format(Messages::CMD_POLICY_LINE, name: Messages::POLICY_NAMES.fetch(@config.policy)))
       @ui.puts(format(Messages::LOG_STARTED, path: @config.log)) if @config.log
       :handled
     end
