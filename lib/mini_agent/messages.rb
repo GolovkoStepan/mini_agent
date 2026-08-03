@@ -69,6 +69,43 @@ module MiniAgent
     # модели сворачивают диалог в аннотацию вида «обсуждали рефакторинг»:
     # красиво, коротко и бесполезно для продолжения работы. Ценны как раз
     # частности — какие файлы правились, что уже проверено, что осталось.
+    # Задача для /init. Уходит МОДЕЛИ обычным сообщением пользователя, дальше
+    # работает обычный цикл ходов: чтобы описать проект, его надо прочитать.
+    #
+    # Перечень разделов задан явно по той же причине, что и в COMPACT_REQUEST:
+    # без него модели пишут пересказ README вместо того, что агенту нужно
+    # знать перед работой. Требование проверять команды, а не переписывать их
+    # из документации, — оттуда же: неверная команда сборки хуже её отсутствия,
+    # потому что выглядит проверенной.
+    #
+    # Язык берётся из самого проекта: агент запускают и в русских, и в чужих
+    # репозиториях, а описание читает потом человек.
+    INIT_REQUEST = <<~PROMPT
+      Explore this project and write %<filename>s in the working directory.
+
+      The file is read by a coding agent at the start of every session, before
+      it sees any task. Write what such an agent must know and cannot guess:
+
+      1. What the project is and what it does — two or three sentences.
+      2. How to build, test and lint it. Give the exact commands. RUN each one
+         you are about to write down, or list the available targets (`rake -T`,
+         `make help`, `npm run`) and copy only names that appear there. An
+         import or a mention in the README is not proof a task exists. Omit
+         a command you could not verify: a wrong one is worse than none,
+         because it looks checked.
+      3. Layout: which directory holds what. Only what is not obvious.
+      4. Conventions a newcomer would violate: language of comments and docs,
+         naming, formatting, commit style, anything the project enforces.
+      5. Constraints and gotchas worth knowing before touching the code.
+
+      Write it in the language the project itself uses in its documentation and
+      comments. Be specific and brief: this file is loaded into every session,
+      so every line costs context. Skip what the code already makes obvious.
+
+      Write the file with a single bash heredoc, then read it back to confirm.
+      Do not print the whole file in your reply — say what you put in it.
+    PROMPT
+
     COMPACT_REQUEST = <<~PROMPT
       Summarize this entire conversation into a compact handover note.
       It will REPLACE the conversation: everything you omit is lost.
@@ -295,6 +332,23 @@ module MiniAgent
     COMPACT_PROJECT_DOMINATES = "Больше половины остатка — описание проекта; уменьшить его можно только правкой файла."
     # Прервали Ctrl+C во время запроса резюме: история цела.
     COMPACT_INTERRUPTED = "Сворачивание прервано. История сохранена."
+
+    # --- /init ---
+    BYTES = %w[байт байта байт].freeze
+
+    CMD_INIT = "создать описание проекта (AGENTS.md)"
+    INIT_EXISTS = "Описание проекта уже есть: %<name>s (%<size>s)."
+    INIT_OVERWRITE = "  Перезаписать? (y/N): "
+    INIT_CANCELLED = "Отменено. Файл не тронут."
+    INIT_DONE = "Описание проекта записано: %<name>s (%<size>s)."
+    # Описание попадает в системный промпт при сборке истории, а та собрана
+    # на старте: применить новое к текущему диалогу нельзя, не выбросив его.
+    # Молчать об этом нельзя — иначе кажется, что агент уже всё знает.
+    INIT_TAKES_EFFECT = "  Оно вступит в силу после /clear или при следующем запуске."
+    # Модель охотно рапортует об успехе, не выполнив записи. Проверяется файл.
+    INIT_MISSING = "Модель не создала %<name>s. Описание проекта не записано."
+    INIT_SIZE_UNKNOWN = "размер неизвестен"
+
     CMD_UNKNOWN = "Неизвестная команда: /%<name>s. /help — список."
     # Ctrl+C прерывает задачу, а не сессию: история цела, можно продолжать.
     TASK_INTERRUPTED = "Прервано. История сохранена."

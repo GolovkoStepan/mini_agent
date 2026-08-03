@@ -401,4 +401,49 @@ RSpec.describe MiniAgent::Agent do
       expect(agent.usage).to be_empty
     end
   end
+
+  describe "#init" do
+    # History собрана на старте и о созданном посреди сессии файле не знает.
+    # Без этой строчки описание не подхватилось бы до перезапуска, причём
+    # молча — ровно та ошибка, ради которой History и заводилась.
+    it "кладёт новое описание в историю для следующей сборки" do
+      Dir.mktmpdir do |dir|
+        history = MiniAgent::History.new
+        agent = described_class.new(
+          config: MiniAgent::Config.new({ cwd: dir }, env: {}),
+          client: client, tools: tools, ui: ui, history: history,
+          prompt: MiniAgent::Prompt::AutoApprove.new
+        )
+        allow(client).to receive(:chat) do
+          File.write(File.join(dir, "AGENTS.md"), "Тесты: make spec")
+          ["записал", []]
+        end
+
+        agent.init(agent.new_conversation)
+
+        expect(history.project_context).to include("make spec")
+        expect(agent.new_conversation.to_a.first[:content]).to include("make spec")
+      end
+    end
+
+    # Текущий диалог остаётся как был: применить описание к нему значило бы
+    # его выбросить — скрытый /clear там, где о нём не просили.
+    it "не переписывает текущую историю" do
+      Dir.mktmpdir do |dir|
+        agent = described_class.new(
+          config: MiniAgent::Config.new({ cwd: dir }, env: {}),
+          client: client, tools: tools, ui: ui,
+          prompt: MiniAgent::Prompt::AutoApprove.new
+        )
+        allow(client).to receive(:chat) do
+          File.write(File.join(dir, "AGENTS.md"), "описание")
+          ["записал", []]
+        end
+        conversation = agent.new_conversation
+
+        expect(agent.init(conversation)).to be(conversation)
+        expect(conversation.to_a.first[:content]).not_to include("описание")
+      end
+    end
+  end
 end

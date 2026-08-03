@@ -168,4 +168,12 @@ RSpec.describe MiniAgent::SlashCommands do
       expect(commands.call("/compact")).to eq(:compact)
     end
   end
+
+  describe "/init" do
+    # Описание проекта агент собирает целым циклом ходов с bash — тем более
+    # не дело команд, чем сворачивание.
+    it "просит описать проект" do
+      expect(commands.call("/init")).to eq(:init)
+    end
+  end
 end

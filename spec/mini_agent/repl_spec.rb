@@ -163,6 +163,32 @@ RSpec.describe MiniAgent::Repl do
       end
     end
 
+    describe "/init" do
+      # Новое описание применяется при следующей сборке истории, а не сразу:
+      # проверяем именно связку /init → /clear, потому что молчаливая потеря
+      # описания на очистке — та самая ошибка, ради которой заведена History.
+      it "описание попадает в историю после /clear" do
+        Dir.mktmpdir do |dir|
+          config = MiniAgent::Config.new({ max_turns: 3, cwd: dir }, env: {})
+          agent = MiniAgent::Agent.new(
+            config: config, client: client, tools: tools, ui: ui,
+            prompt: MiniAgent::Prompt::AutoApprove.new
+          )
+          allow(client).to receive(:chat) do
+            File.write(File.join(dir, "AGENTS.md"), "Тесты: make spec")
+            ["записал", []]
+          end
+
+          reader = MiniAgent::LineReader.new(input: StringIO.new("/init\n/clear\nexit\n"), output: out)
+          conversation = described_class.new(
+            agent: agent, config: config, tools: tools, ui: ui, reader: reader
+          ).run
+
+          expect(conversation.to_a.first[:content]).to include("make spec")
+        end
+      end
+    end
+
     describe "/compact" do
       # Главное про эту ветку: свёрнутая история должна уехать в следующую
       # итерацию цикла. Вернуть здесь прежнюю conversation — значит молча

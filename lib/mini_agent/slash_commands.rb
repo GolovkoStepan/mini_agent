@@ -30,6 +30,7 @@ module MiniAgent
     VERDICTS = {
       "clear" => :clear,
       "compact" => :compact,
+      "init" => :init,
       "exit" => :exit,
       "quit" => :exit
     }.freeze
@@ -41,6 +42,7 @@ module MiniAgent
       "clear" => Messages::CMD_CLEAR,
       "context" => Messages::CMD_CONTEXT,
       "compact" => Messages::CMD_COMPACT,
+      "init" => Messages::CMD_INIT,
       "model" => Messages::CMD_MODEL,
       "tools" => Messages::CMD_TOOLS,
       "usage" => Messages::CMD_USAGE,
@@ -59,7 +61,8 @@ module MiniAgent
 
     # Возвращает, что делать вызывающему: :task — отдать модели,
     # :handled — команда уже отработала, :clear — начать историю заново,
-    # :compact — свернуть диалог, :exit — выйти из режима.
+    # :compact — свернуть диалог, :init — описать проект, :exit — выйти
+    # из режима.
     #
     # conversation нужна тем командам, которые смотрят на историю (/context).
     # Передаётся аргументом, а не хранится в поле: владеет ею Repl, и она

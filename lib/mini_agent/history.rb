@@ -15,7 +15,13 @@ module MiniAgent
       @transcript = transcript
     end
 
-    attr_reader :project_context, :transcript
+    attr_reader :transcript
+
+    # Описание проекта записываемо ради /init: команда создаёт AGENTS.md
+    # посреди сессии, а History собрана на старте и о новом файле не знает.
+    # Применяется оно при следующей сборке — то есть по /clear или /compact;
+    # переписывать текущую историю на месте значило бы её выбросить.
+    attr_accessor :project_context
 
     def build
       Conversation.new(project_context: @project_context, transcript: @transcript)

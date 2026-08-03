@@ -79,6 +79,7 @@ module MiniAgent
       when :handled then conversation
       when :clear then clear
       when :compact then @agent.compact(conversation)
+      when :init then @agent.init(conversation)
       else
         @agent.run(task, conversation: conversation)
         conversation

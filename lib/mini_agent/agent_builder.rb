@@ -32,9 +32,16 @@ module MiniAgent
 
     private
 
+    # Подтверждение перезаписи в /init спрашивается тем же объектом, что и
+    # согласие на опасную команду: два разных Prompt на одних и тех же
+    # потоках разошлись бы при первой же подмене ввода в тестах.
     def build_agent(client, tools, log)
       history = History.new(project_context: project_context, transcript: log)
-      Agent.new(config: @config, client: client, tools: tools, ui: @ui, history: history)
+      Agent.new(config: @config, client: client, tools: tools, ui: @ui, history: history, prompt: prompt)
+    end
+
+    def prompt
+      @prompt ||= Prompt.new(input: @input, output: @output)
     end
 
     # О включённом журнале сообщаем строкой в выводе — по той же причине, что
@@ -66,7 +73,7 @@ module MiniAgent
     def build_tools
       guard = CommandGuard.new(
         allow_unsafe: @config.allow_unsafe?,
-        prompt: Prompt.new(input: @input, output: @output),
+        prompt: prompt,
         ui: @ui
       )
       runner = ProcessRunner.new(timeout: @config.timeout, cwd: @config.cwd)

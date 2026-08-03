@@ -96,7 +96,7 @@ module MiniAgent
   end
 
   class History
-    attr_reader project_context: String?
+    attr_accessor project_context: String?
     attr_reader transcript: Transcript?
 
     def initialize: (?project_context: String?, ?transcript: Transcript?) -> void
@@ -143,6 +143,11 @@ module MiniAgent
 
   class Compactor
     def initialize: (client: LLMClient, history: History, ui: UI, ?usage: Usage?) -> void
+    def call: (Conversation conversation) -> Conversation
+  end
+
+  class Initializer
+    def initialize: (agent: Agent, config: Config, ui: UI, ?prompt: Prompt?) -> void
     def call: (Conversation conversation) -> Conversation
   end
 
@@ -272,9 +277,10 @@ module MiniAgent
   class Agent
     MAX_TOOL_OUTPUT: Integer
 
-    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History) -> void
+    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History, ?prompt: Prompt?) -> void
     def new_conversation: () -> Conversation
     def compact: (Conversation conversation) -> Conversation
+    def init: (Conversation conversation) -> Conversation
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def failed?: () -> bool
     def usage: () -> Usage
@@ -293,7 +299,7 @@ module MiniAgent
 
   class SlashCommands
     # Команды, меняющие состояние сессии: исполняет их Repl, а не сами команды.
-    type verdict = :clear | :compact | :exit
+    type verdict = :clear | :compact | :init | :exit
 
     PATTERN: Regexp
     BARE_EXIT: Array[String]

@@ -21,6 +21,13 @@ Metrics/AbcSize:
 Metrics/CyclomaticComplexity:
   Max: 8
 
+# Ключевые аргументы не считаются: правило защищает от нечитаемого
+# позиционного вызова вида f(a, b, nil, true, 3), а имя на месте вызова эту
+# задачу уже решает. Внедрение зависимостей здесь принципиальное (см. CLAUDE.md),
+# и у Agent шесть именованных сотрудников — не длинный список, а полный состав.
+Metrics/ParameterLists:
+  CountKeywordArgs: false
+
 Metrics/ClassLength:
   Max: 130
 

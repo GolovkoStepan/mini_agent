@@ -10,12 +10,13 @@ module MiniAgent
     # которое UI применяет для читаемости консоли (UI::PREVIEW_LINES).
     MAX_TOOL_OUTPUT = 10_000
 
-    def initialize(config:, client:, tools:, ui:, history: History.new)
+    def initialize(config:, client:, tools:, ui:, history: History.new, prompt: nil)
       @config = config
       @client = client
       @tools = tools
       @ui = ui
       @history = history
+      @prompt = prompt
       @usage = Usage.new
     end
 
@@ -37,6 +38,24 @@ module MiniAgent
     # половину AgentBuilder. Сама работа — в Compactor; здесь один вызов.
     def compact(conversation)
       Compactor.new(client: @client, history: @history, ui: @ui, usage: @usage).call(conversation)
+    end
+
+    # Описать проект в AGENTS.md (/init). Возвращает историю: команда ведёт
+    # обычный диалог, и его сообщения в ней остаются.
+    #
+    # Живёт здесь по той же причине, что и compact, но работает иначе: там
+    # один запрос, здесь полный цикл ходов — прочитать проект без bash нельзя.
+    # Отсюда и передача self: Initializer зовёт run, а не client напрямую.
+    #
+    # Новое описание кладётся в History сразу, но текущий диалог им не
+    # переписывается: оно попадает в системный промпт при сборке истории,
+    # то есть на ближайшем /clear или /compact. Применить его к текущей
+    # истории значило бы её выбросить — скрытый /clear там, где о нём
+    # не просили.
+    def init(conversation)
+      result = Initializer.new(agent: self, config: @config, ui: @ui, prompt: @prompt).call(conversation)
+      @history.project_context = ProjectContext.load(@config.cwd || Dir.pwd)
+      result
     end
 
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
