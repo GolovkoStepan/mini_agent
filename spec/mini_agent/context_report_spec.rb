@@ -178,4 +178,42 @@ RSpec.describe MiniAgent::ContextReport do
       expect(described_class.new(talk).tokens).to be_nil
     end
   end
+
+  describe "контекстное окно" do
+    let(:talk) { conversation.tap { |c| c.user("задача") } }
+
+    def usage(prompt)
+      MiniAgent::Usage.new.tap { |u| u.add({ "prompt_tokens" => prompt, "completion_tokens" => 5 }) }
+    end
+
+    def settings(window:, max_tokens: 1000)
+      MiniAgent::Config.new({ context_window: window, max_tokens: max_tokens }, env: {})
+    end
+
+    it "собирает окно из настроек и данных сервера" do
+      window = described_class.new(talk, usage: usage(2000), config: settings(window: 8192)).window
+
+      expect(window.size).to eq(8192)
+      expect(window.occupied).to eq(3000)
+    end
+
+    # Отчёт отдаёт окно всегда — незнающее, если знать неоткуда. Решение
+    # «показывать или нет» принимает UI, и разводить эту проверку на два
+    # места незачем.
+    it "отдаёт незнающее окно без настроек" do
+      expect(described_class.new(talk).window).not_to be_known
+    end
+
+    it "отдаёт незнающее окно, когда размер не задан" do
+      expect(described_class.new(talk, usage: usage(2000), config: settings(window: nil)).window).not_to be_known
+    end
+
+    # Размер известен, а промпта нет: сервер не прислал usage.
+    it "знает размер, но мерить не может без usage" do
+      window = described_class.new(talk, config: settings(window: 8192)).window
+
+      expect(window).to be_known
+      expect(window).not_to be_measurable
+    end
+  end
 end

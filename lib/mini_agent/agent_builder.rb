@@ -20,6 +20,7 @@ module MiniAgent
     # и файл журнала живут ровно столько, сколько выполняется блок.
     def call
       log = transcript
+      detect_window
       client = LLMClient.new(config: @config, ui: @ui)
       tools = build_tools
 
@@ -31,6 +32,19 @@ module MiniAgent
     end
 
     private
+
+    # Размер контекстного окна: спрашиваем сервер, если человек не указал его
+    # сам. Заданное явно не перепроверяется — оно перебивает угаданное, и
+    # лишний запрос тут ничего бы не решил, только задержал старт.
+    #
+    # Молча: проба необязательна, а её неудача — обычное дело на любом
+    # сервере, кроме LM Studio. Узнанное видно в /context и /usage, там же
+    # видно и незнание — строкой о том, что размер окна неизвестен.
+    def detect_window
+      return if @config.context_window
+
+      @config.context_window = WindowProbe.new(config: @config).call
+    end
 
     # Подтверждение перезаписи в /init спрашивается тем же объектом, что и
     # согласие на опасную команду: два разных Prompt на одних и тех же

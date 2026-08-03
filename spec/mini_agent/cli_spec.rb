@@ -2,6 +2,11 @@
 
 RSpec.describe MiniAgent::CLI do
   let(:out) { StringIO.new }
+  # Проба размера окна идёт при каждом старте агента, и адрес сервера в
+  # примерах ниже разный — отсюда образец вместо точного URL. По умолчанию
+  # отвечаем отказом: так ведёт себя любой сервер, кроме LM Studio, и все
+  # примеры заодно проверяют, что без пробы агент работает как прежде.
+  before { stub_request(:get, %r{/api/v0/models}).to_return(status: 404, body: "") }
 
   def start(argv, input: StringIO.new(""))
     described_class.start(argv, out: out, input: input)
@@ -173,6 +178,42 @@ RSpec.describe MiniAgent::CLI do
 
         expect(code).to eq(1)
         expect(out.string).to include("Каталог для журнала не найден")
+      end
+    end
+
+    # Размер контекстного окна протокол не сообщает, а знать его надо: в него
+    # упирается и рост истории, и max_tokens. У LM Studio он есть в своём
+    # /api/v0/models — оттуда и берём, когда получается.
+    describe "размер контекстного окна" do
+      def loaded(size)
+        { "data" => [{ "id" => "qwen", "state" => "loaded", "loaded_context_length" => size }] }.to_json
+      end
+
+      it "спрашивает сервер при старте" do
+        stub_request(:get, %r{/api/v0/models}).to_return(status: 200, body: loaded(65_536))
+
+        start(["-i", "--base-url", "http://cli.test/v1"], input: StringIO.new("/model\nexit\n"))
+
+        expect(out.string).to include("65536 токенов")
+      end
+
+      # Заданное человеком перебивает угаданное, и лишний запрос при старте
+      # только задержал бы его.
+      it "не спрашивает, когда размер задан явно" do
+        start(["-i", "--base-url", "http://cli.test/v1", "--context-window", "4096"],
+              input: StringIO.new("/model\nexit\n"))
+
+        expect(out.string).to include("4096 токенов")
+        expect(a_request(:get, %r{/api/v0/models})).not_to have_been_made
+      end
+
+      # Так ответит любой сервер, кроме LM Studio. Проба необязательна, и
+      # её неудача не должна ни мешать работе, ни шуметь в выводе.
+      it "молчит и работает дальше, когда сервер не отвечает на пробу" do
+        code = start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(code).to eq(0)
+        expect(out.string).to include("готово")
       end
     end
 

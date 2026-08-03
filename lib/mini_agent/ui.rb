@@ -90,22 +90,17 @@ module MiniAgent
       print_ellipsis(lines.size - shown.size)
     end
 
-    # Разбивка контекста по категориям (/context).
-    #
-    # Знаки и токены разделены пустой строкой намеренно: первые посчитаны
-    # здесь и точны, второе — то, что сообщил сервер. Смешивать измеренное
-    # с полученным извне в одной таблице значит выдавать их за однородные.
+    # Разбивка контекста по категориям (/context). Сама печать — в
+    # ContextView: там три источника чисел со своими «неизвестно» и три
+    # предупреждения с разным лечением, а здесь остаётся маркер и цвет.
     def context(report)
-      return puts(Messages::CMD_CONTEXT_EMPTY) if report.empty?
+      ContextView.new(self).call(report)
+    end
 
-      puts(format(Messages::CMD_CONTEXT_HEADER, count: Plural.with(report.messages, *Messages::MESSAGES_WORD)))
-      puts("")
-      report.sizes.each { |name, size| context_line(name, size, report.share(name)) }
-      puts(Messages::CMD_CONTEXT_RULE)
-      puts(format(Messages::CMD_CONTEXT_TOTAL, name: Messages::CMD_CONTEXT_TOTAL_NAME, size: chars(report.total)))
-      puts("")
-      context_tokens(report)
-      warn(Messages::CMD_CONTEXT_FIXED) if report.project_dominates?
+    # Открыт ради ContextView: раскраска знает про tty, и второй такой
+    # выключатель разошёлся бы с этим при первой же правке.
+    def paint(text, *styles)
+      Color.paint(text, *styles, enabled: @tty)
     end
 
     # Список моделей сервера с пометкой выбранной: ради этого сравнения
@@ -135,23 +130,6 @@ module MiniAgent
     end
 
     private
-
-    def context_line(name, size, share)
-      label = Messages::CMD_CONTEXT_NAMES.fetch(name, name.to_s)
-      puts(format(Messages::CMD_CONTEXT_LINE, name: label, size: chars(size), share: share))
-    end
-
-    def chars(count) = Plural.with(count, *Messages::CHARS)
-
-    # Отсутствие числа и ноль — разные вещи: сервер мог не прислать usage
-    # вовсе, и промолчать об этом честнее, чем показать «0 токенов».
-    def context_tokens(report)
-      tokens = report.tokens
-      return puts(paint(Messages::CMD_CONTEXT_NO_TOKENS, :gray)) if tokens.nil?
-
-      text = format(Messages::CMD_CONTEXT_TOKENS, count: Plural.with(tokens, *Messages::TOKENS))
-      puts(paint(text, :gray))
-    end
 
     # Первая строка результата — «Код выхода: N» от Tools::Bash. Человеку
     # она нужна только когда команда упала, поэтому отрезаем её от тела и
@@ -204,10 +182,6 @@ module MiniAgent
 
     def spinner_text
       [Messages::THINKING, @status].compact.join(" ")
-    end
-
-    def paint(text, *styles)
-      Color.paint(text, *styles, enabled: @tty)
     end
   end
 end

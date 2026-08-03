@@ -91,6 +91,33 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  describe "контекстное окно" do
+    it "по умолчанию неизвестно" do
+      expect(described_class.new({}, env: {}).context_window).to be_nil
+    end
+
+    it "читается из опции и из ENV" do
+      expect(described_class.new({ context_window: 65_536 }, env: {}).context_window).to eq(65_536)
+      expect(described_class.new({}, env: { "CONTEXT_WINDOW" => "8192" }).context_window).to eq(8192)
+    end
+
+    # Ноль и мусор означают то же, что и отсутствие значения. Превратить их
+    # в 0 значило бы сделать «неизвестно» неотличимым от «окно нулевого
+    # размера», и всё, что считает доли от окна, делило бы на ноль.
+    it "не принимает ноль и мусор за размер" do
+      expect(described_class.new({ context_window: 0 }, env: {}).context_window).to be_nil
+      expect(described_class.new({}, env: { "CONTEXT_WINDOW" => "мусор" }).context_window).to be_nil
+    end
+
+    # Записываемо: значение приходит от сервера уже после создания настроек.
+    it "принимает узнанное у сервера значение" do
+      config = described_class.new({}, env: {})
+      config.context_window = 8192
+
+      expect(config.context_window).to eq(8192)
+    end
+  end
+
   describe "рабочий каталог" do
     around do |example|
       Dir.mktmpdir { |dir| example.run(@dir = dir) }

@@ -20,10 +20,11 @@ module MiniAgent
     # различение fixed/compactable — см. ниже.
     CATEGORIES = %i[system project tasks answers tools].freeze
 
-    def initialize(conversation, usage: nil)
+    def initialize(conversation, usage: nil, config: nil)
       @sizes = Hash.new(0)
       @messages = conversation.size
       @usage = usage
+      @config = config
       measure(conversation)
     end
 
@@ -79,6 +80,21 @@ module MiniAgent
       return nil if @usage.nil? || @usage.empty?
 
       @usage.context
+    end
+
+    # Заполнение контекстного окна — единственная строка отчёта, где знаки
+    # не при чём: и размер окна, и промпт меряются в токенах, а пересчёт
+    # одного в другое здесь отвергнут по той же причине, что и везде.
+    #
+    # Отдаётся всегда, даже когда мерить нечем: Window сам знает, что он
+    # ничего не знает, и решение «показывать или нет» принимает UI. Возвращать
+    # отсюда nil значило бы развести проверку на два места.
+    def window
+      Window.new(
+        size: @config&.context_window,
+        prompt_tokens: tokens,
+        max_tokens: @config&.max_tokens.to_i
+      )
     end
 
     private

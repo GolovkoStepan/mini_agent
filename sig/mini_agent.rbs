@@ -53,6 +53,7 @@ module MiniAgent
     attr_reader retry_delay: Float
     attr_reader max_tokens: Integer
     attr_reader timeout: Float
+    attr_accessor context_window: Integer?
 
     def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
     def allow_unsafe?: () -> bool
@@ -124,12 +125,28 @@ module MiniAgent
     def self.with: (Integer count, String one, String few, String many) -> String
   end
 
+  class Window
+    WARN_AT: Float
+
+    attr_reader size: Integer?
+    attr_reader max_tokens: Integer
+
+    def initialize: (size: Integer?, ?prompt_tokens: Integer?, ?max_tokens: Integer) -> void
+    def known?: () -> bool
+    def measurable?: () -> bool
+    def occupied: () -> Integer
+    def percent: () -> Integer
+    def free: () -> Integer?
+    def tight?: () -> bool
+    def starved?: () -> bool
+  end
+
   class ContextReport
     type category = :system | :project | :tasks | :answers | :tools
 
     CATEGORIES: Array[category]
 
-    def initialize: (Conversation conversation, ?usage: Usage?) -> void
+    def initialize: (Conversation conversation, ?usage: Usage?, ?config: Config?) -> void
     def sizes: () -> Hash[category, Integer]
     def messages: () -> Integer
     def total: () -> Integer
@@ -139,6 +156,12 @@ module MiniAgent
     def compactable: () -> Integer
     def project_dominates?: () -> bool
     def tokens: () -> Integer?
+    def window: () -> Window
+  end
+
+  class ContextView
+    def initialize: (UI ui) -> void
+    def call: (ContextReport report) -> void
   end
 
   class Compactor
@@ -224,6 +247,7 @@ module MiniAgent
     def print: (untyped text) -> void
     def assistant: (String content) -> void
     def context: (ContextReport report) -> void
+    def paint: (untyped text, *Symbol styles) -> String
     def models: (Array[String] names, selected: String, url: String) -> void
     def warn: (String text) -> void
     def error: (String text) -> void
@@ -249,6 +273,14 @@ module MiniAgent
 
     def initialize: (config: Config, http: untyped) -> void
     def call: () -> Array[String]
+  end
+
+  class WindowProbe
+    PATH: String
+    TIMEOUT: Integer
+
+    def initialize: (config: Config) -> void
+    def call: () -> Integer?
   end
 
   class ChatResponse

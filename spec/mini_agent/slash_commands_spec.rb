@@ -65,6 +65,22 @@ RSpec.describe MiniAgent::SlashCommands do
 
       expect(out.string).to include("qwen-test", "http://srv:1234/v1", Dir.pwd)
     end
+
+    it "показывает размер окна, когда он известен" do
+      settings = MiniAgent::Config.new({ context_window: 65_536 }, env: {})
+
+      described_class.new(config: settings, tools: tools, ui: ui).call("/model")
+
+      expect(out.string).to include("65536 токенов")
+    end
+
+    # Прочерк вместо числа: незнание не выдаётся за ноль, а подсказка стоит
+    # тут же — искать её в справке пришлось бы ровно в этот момент.
+    it "говорит прямо, когда размер окна неизвестен" do
+      commands.call("/model")
+
+      expect(out.string).to include("неизвестно (--context-window)")
+    end
   end
 
   describe "/tools" do

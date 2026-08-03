@@ -23,6 +23,11 @@ module MiniAgent
       retry_count: 3,
       retry_delay: 2,
       max_tokens: 4096,
+      # nil, а не число: размер контекстного окна задаётся при загрузке модели
+      # на сервере, OpenAI-совместимый протокол его не сообщает, и любое
+      # умолчание здесь было бы выдумкой. Не знаем — так и говорим; спросить
+      # сервер пробует WindowProbe.
+      context_window: nil,
       allow_unsafe: false,
       timeout: 120,
       # nil, а не Dir.pwd: умолчания замораживаются при загрузке файла, а
@@ -41,6 +46,7 @@ module MiniAgent
       retry_count: "RETRY_COUNT",
       retry_delay: "RETRY_DELAY",
       max_tokens: "MAX_TOKENS",
+      context_window: "CONTEXT_WINDOW",
       allow_unsafe: "ALLOW_UNSAFE",
       timeout: "COMMAND_TIMEOUT",
       cwd: "AGENT_CWD",
@@ -49,6 +55,14 @@ module MiniAgent
 
     attr_reader :base_url, :api_key, :model, :max_turns,
                 :retry_count, :retry_delay, :max_tokens, :timeout, :cwd, :log
+
+    # Размер контекстного окна: число или nil, если он неизвестен.
+    #
+    # Записываемо намеренно — значение может прийти от сервера уже после
+    # создания настроек (WindowProbe спрашивает его при старте соединения).
+    # Держать «узнанное» отдельным полем в третьем месте значило бы завести
+    # два источника одного и того же числа.
+    attr_accessor :context_window
 
     def initialize(options = {}, env: ENV)
       @options = options
@@ -93,6 +107,18 @@ module MiniAgent
       @retry_delay = fetch(:retry_delay).to_f
       @max_tokens = fetch(:max_tokens).to_i
       @timeout = fetch(:timeout).to_f
+      @context_window = positive_or_nil(fetch(:context_window))
+    end
+
+    # Ноль и мусор («--context-window abc») означают то же, что и отсутствие
+    # значения: размер окна неизвестен. Превращать их в 0 нельзя — тогда
+    # «неизвестно» стало бы неотличимо от «окно нулевого размера», и всё,
+    # что считает доли от окна, поделило бы на ноль.
+    def positive_or_nil(value)
+      return nil if value.nil?
+
+      number = value.to_i
+      number.positive? ? number : nil
     end
 
     # options.key? вместо проверки на истинность: иначе явное false

@@ -100,7 +100,7 @@ module MiniAgent
     def context(conversation)
       return empty_context if conversation.nil?
 
-      @ui.context(ContextReport.new(conversation, usage: @usage))
+      @ui.context(ContextReport.new(conversation, usage: @usage, config: @config))
       :handled
     end
 
@@ -122,9 +122,19 @@ module MiniAgent
     def model
       @ui.puts(format(Messages::CMD_MODEL_LINE, model: @config.model))
       @ui.puts(format(Messages::CMD_SERVER_LINE, url: @config.base_url))
+      @ui.puts(format(Messages::CMD_WINDOW_LINE, size: window_size))
       @ui.puts(format(Messages::CMD_CWD_LINE, path: @config.cwd || Dir.pwd))
       @ui.puts(format(Messages::LOG_STARTED, path: @config.log)) if @config.log
       :handled
+    end
+
+    # Окно показывается рядом с моделью, а не только в /context: это её
+    # свойство, заданное при загрузке, и спрашивают о нём тогда же, когда
+    # о самой модели. Прочерк вместо числа — тот же принцип, что и везде:
+    # незнание не выдаётся за ноль.
+    def window_size
+      size = @config.context_window
+      size ? format(Messages::CMD_WINDOW_KNOWN, size: size) : Messages::CMD_WINDOW_UNKNOWN
     end
 
     def tools
