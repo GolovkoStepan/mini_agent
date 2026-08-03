@@ -4,8 +4,12 @@ RSpec.describe MiniAgent::LLMClient do
   let(:base_url) { "http://llm.test/v1" }
   let(:endpoint) { "#{base_url}/chat/completions" }
   # retry_delay: 0 — тесты не должны спать между попытками.
+  # stream: false — здесь проверяется разбор обычного ответа; потоковый режим
+  # включён по умолчанию и разбирается иначе, поэтому у него свой раздел ниже.
   let(:config) do
-    MiniAgent::Config.new({ base_url: base_url, api_key: "secret", model: "test-model", retry_delay: 0 }, env: {})
+    MiniAgent::Config.new(
+      { base_url: base_url, api_key: "secret", model: "test-model", retry_delay: 0, stream: false }, env: {}
+    )
   end
 
   subject(:client) { described_class.new(config: config) }
@@ -220,7 +224,7 @@ RSpec.describe MiniAgent::LLMClient do
     # Сервер знает, когда освободится, а настроенная задержка — только догадка.
     it "ждёт время из заголовка Retry-After вместо настроенной задержки" do
       slept = []
-      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2, stream: false }, env: {})
       client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
       stub_request(:post, endpoint)
         .to_return(status: 429, headers: { "Retry-After" => "5" }).then
@@ -234,7 +238,7 @@ RSpec.describe MiniAgent::LLMClient do
     # Иначе задержка от давнего 429 тянулась бы через все следующие повторы.
     it "не переносит Retry-After на последующие попытки" do
       slept = []
-      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2, stream: false }, env: {})
       client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
       stub_request(:post, endpoint)
         .to_return(status: 429, headers: { "Retry-After" => "5" }).then
@@ -250,7 +254,7 @@ RSpec.describe MiniAgent::LLMClient do
     # ожидание неотличимо от зависания.
     it "ограничивает Retry-After потолком" do
       slept = []
-      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2, stream: false }, env: {})
       client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
       stub_request(:post, endpoint)
         .to_return(status: 429, headers: { "Retry-After" => "3600" }).then
@@ -265,7 +269,7 @@ RSpec.describe MiniAgent::LLMClient do
     # её не шлют — разбирать её значило бы тянуть зависимость от времени.
     it "игнорирует Retry-After в формате даты" do
       slept = []
-      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2 }, env: {})
+      config = MiniAgent::Config.new({ base_url: base_url, retry_delay: 2, stream: false }, env: {})
       client = described_class.new(config: config, sleeper: ->(seconds) { slept << seconds })
       stub_request(:post, endpoint)
         .to_return(status: 429, headers: { "Retry-After" => "Wed, 21 Oct 2026 07:28:00 GMT" }).then
@@ -352,6 +356,165 @@ RSpec.describe MiniAgent::LLMClient do
         .to_return(status: 200, body: chat_response)
 
       expect(client.chat(messages).first).to eq("готово")
+    end
+  end
+
+  describe "потоковый режим" do
+    # Умолчание: stream включён, и его отсутствие в этом конфиге намеренно.
+    let(:config) do
+      MiniAgent::Config.new({ base_url: base_url, api_key: "secret", model: "test-model", retry_delay: 0 }, env: {})
+    end
+
+    def sse(*events)
+      "#{events.map { |event| "data: #{event.to_json}\n\n" }.join}data: [DONE]\n\n"
+    end
+
+    def delta(content: nil, finish_reason: nil, tool_calls: nil)
+      body = {}
+      body["content"] = content if content
+      body["tool_calls"] = tool_calls if tool_calls
+      { "choices" => [{ "index" => 0, "delta" => body, "finish_reason" => finish_reason }] }
+    end
+
+    it "просит поток и расход токенов вместе с ним" do
+      stub_request(:post, endpoint).to_return(status: 200, body: sse(delta(content: "x", finish_reason: "stop")))
+
+      client.chat(messages)
+
+      expect(a_request(:post, endpoint).with(
+               body: hash_including("stream" => true, "stream_options" => { "include_usage" => true })
+             )).to have_been_made
+    end
+
+    it "собирает текст из дельт" do
+      stub_request(:post, endpoint).to_return(
+        status: 200, body: sse(delta(content: "при"), delta(content: "вет", finish_reason: "stop"))
+      )
+
+      content, tool_calls, _usage, finish_reason = client.chat(messages)
+
+      expect(content).to eq("привет")
+      expect(tool_calls).to eq([])
+      expect(finish_reason).to eq("stop")
+    end
+
+    # usage приходит отдельным куском с пустым choices — без include_usage
+    # его в потоке нет вовсе, и /usage показывал бы нули.
+    it "берёт usage из завершающего куска" do
+      body = sse(delta(content: "готово", finish_reason: "stop"),
+                 { "choices" => [], "usage" => { "prompt_tokens" => 16, "completion_tokens" => 4 } })
+      stub_request(:post, endpoint).to_return(status: 200, body: body)
+
+      _content, _tool_calls, usage = client.chat(messages)
+
+      expect(usage).to include("prompt_tokens" => 16, "completion_tokens" => 4)
+    end
+
+    it "склеивает вызов инструмента из кусков аргументов" do
+      body = sse(
+        delta(tool_calls: [{ "index" => 0, "id" => "call_1", "type" => "function",
+                             "function" => { "name" => "bash", "arguments" => "" } }]),
+        delta(tool_calls: [{ "index" => 0, "function" => { "arguments" => "{\"command\":" } }]),
+        delta(tool_calls: [{ "index" => 0, "function" => { "arguments" => "\"ls\"}" } }], finish_reason: "tool_calls")
+      )
+      stub_request(:post, endpoint).to_return(status: 200, body: body)
+
+      _content, tool_calls = client.chat(messages)
+
+      expect(tool_calls.first["function"]).to eq("name" => "bash", "arguments" => "{\"command\":\"ls\"}")
+    end
+
+    # Ошибки разбираются одинаково в обоих режимах: тело у них обычный JSON,
+    # а не поток, и ErrorResponse ждёт именно строку.
+    it "не повторяет запрос при HTTP 400" do
+      stub_request(:post, endpoint).to_return(status: 400, body: { "error" => "плохой запрос" }.to_json)
+
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /плохой запрос/)
+      expect(a_request(:post, endpoint)).to have_been_made.once
+    end
+
+    it "повторяет запрос после HTTP 500" do
+      stub_request(:post, endpoint)
+        .to_return(status: 500, body: "boom").then
+        .to_return(status: 200, body: sse(delta(content: "со второй", finish_reason: "stop")))
+
+      content, = client.chat(messages)
+
+      expect(content).to eq("со второй")
+    end
+
+    # Сервер, не умеющий stream, отвечает 200 с пустым телом. Без отдельной
+    # ветки это выглядело бы как «модель промолчала» — и агент вышел бы
+    # с кодом 0, ничего не сделав.
+    it "не принимает пустой поток за пустой ответ модели" do
+      stub_request(:post, endpoint).to_return(status: 200, body: "")
+
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError, /--no-stream/)
+    end
+
+    it "повторяет запрос после пустого потока" do
+      stub_request(:post, endpoint)
+        .to_return(status: 200, body: "").then
+        .to_return(status: 200, body: sse(delta(content: "получилось", finish_reason: "stop")))
+
+      content, = client.chat(messages)
+
+      expect(content).to eq("получилось")
+    end
+
+    # Ответ из одних вызовов инструментов текста не содержит вовсе — это
+    # штатный случай, а не пустой поток.
+    it "не считает пустым поток с одним лишь вызовом инструмента" do
+      body = sse(delta(tool_calls: [{ "index" => 0, "id" => "call_1", "type" => "function",
+                                      "function" => { "name" => "bash", "arguments" => "{}" } }],
+                       finish_reason: "tool_calls"))
+      stub_request(:post, endpoint).to_return(status: 200, body: body)
+
+      content, tool_calls = client.chat(messages)
+
+      expect(content).to eq("")
+      expect(tool_calls.size).to eq(1)
+    end
+
+    it "отдаёт куски текста в UI по мере поступления" do
+      ui = spy("UI")
+      allow(ui).to receive(:with_spinner) { |&block| block.call }
+      streaming = described_class.new(config: config, ui: ui)
+      stub_request(:post, endpoint).to_return(
+        status: 200, body: sse(delta(content: "раз"), delta(content: " два", finish_reason: "stop"))
+      )
+
+      streaming.chat(messages)
+
+      expect(ui).to have_received(:stream_chunk).with("раз")
+      expect(ui).to have_received(:stream_chunk).with(" два")
+    end
+
+    # Резюме для /compact замещает историю, а не адресовано человеку: при
+    # стриминге оно вываливалось в терминал целиком, и следом шёл отчёт
+    # «сворачивать было нечего». Найдено живой проверкой.
+    it "не печатает служебный ответ" do
+      ui = spy("UI")
+      allow(ui).to receive(:with_spinner) { |&block| block.call }
+      streaming = described_class.new(config: config, ui: ui)
+      stub_request(:post, endpoint).to_return(status: 200, body: sse(delta(content: "резюме",
+                                                                           finish_reason: "stop")))
+
+      content, = streaming.chat(messages, visible: false)
+
+      expect(content).to eq("резюме")
+      expect(ui).not_to have_received(:stream_chunk)
+    end
+
+    it "не просит поток, когда он отключён" do
+      plain = described_class.new(
+        config: MiniAgent::Config.new({ base_url: base_url, model: "m", stream: false }, env: {})
+      )
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response)
+
+      plain.chat(messages)
+
+      expect(a_request(:post, endpoint).with { |req| !JSON.parse(req.body).key?("stream") }).to have_been_made
     end
   end
 

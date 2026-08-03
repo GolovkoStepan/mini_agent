@@ -59,6 +59,7 @@ module MiniAgent
 
     def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
     def allow_unsafe?: () -> bool
+    def stream?: () -> bool
     def chat_uri: () -> URI::Generic
     def models_uri: () -> URI::Generic
     def cwd: () -> String?
@@ -249,12 +250,15 @@ module MiniAgent
     BULLET: String
     BRANCH: String
     INDENT: String
-    SPINNER_FRAMES: Array[String]
     SPINNER_INTERVAL: Float
 
     def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric) -> void
     def tty?: () -> bool
     def status=: (String? text) -> void
+    def progress=: (String? text) -> void
+    def stream_chunk: (String text) -> void
+    def stream_finish: () -> void
+    def stop_spinner: () -> void
     def puts: (?untyped text) -> void
     def print: (untyped text) -> void
     def assistant: (String content) -> void
@@ -266,6 +270,46 @@ module MiniAgent
     def tool_call: (String name, json_object arguments) -> void
     def tool_result: (String result) -> void
     def with_spinner: [T] () { () -> T } -> T
+  end
+
+  class Spinner
+    FRAMES: Array[String]
+    INTERVAL: Float
+
+    attr_writer status: String?
+    attr_writer progress: String?
+
+    def initialize: (ui: UI, ?enabled: bool, ?interval: Numeric) -> void
+    def around: [T] () { () -> T } -> T
+    def stop: () -> void
+  end
+
+  class ChatPayload
+    TEMPERATURE: Float
+
+    def initialize: (config: Config, messages: Array[message], ?tools: Array[json_object], ?tool_choice: String) -> void
+    def to_json: (*untyped) -> String
+  end
+
+  class StreamParser
+    DATA_PREFIX: String
+    DONE: String
+
+    attr_reader usage: json_object?
+    attr_reader finish_reason: String?
+    attr_reader reasoning_length: Integer
+
+    def initialize: () ?{ (String) -> void } -> void
+    def feed: (String chunk) -> void
+    def content: () -> String
+    def tool_calls: () -> Array[tool_call]
+    def empty?: () -> bool
+    def to_a: () -> [String, Array[tool_call], json_object?, String?]
+  end
+
+  class StreamRequest
+    def initialize: (http: untyped, ?ui: UI?, ?visible: bool) -> void
+    def call: (untyped request) -> [untyped, StreamParser]
   end
 
   class ErrorResponse
@@ -298,6 +342,7 @@ module MiniAgent
   class ChatResponse
     TRUNCATED: String
 
+    def self.parse: (String body) -> [ChatResponse?, String?]
     def initialize: (json_object data, json_object message) -> void
     def content: () -> String
     def tool_calls: () -> Array[tool_call]
@@ -313,7 +358,7 @@ module MiniAgent
 
     def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped) -> void
     def start: [T] () { (LLMClient) -> T } -> T
-    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call], json_object?, String?]
+    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String, ?visible: bool) -> [String, Array[tool_call], json_object?, String?]
     def models: () -> Array[String]
   end
 

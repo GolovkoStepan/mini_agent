@@ -43,7 +43,16 @@ RSpec.describe MiniAgent::Compactor do
     it "запрещает инструменты в запросе резюме" do
       compactor.call(talk)
 
-      expect(client).to have_received(:chat).with(anything, tool_choice: "none")
+      expect(client).to have_received(:chat).with(anything, hash_including(tool_choice: "none"))
+    end
+
+    # Резюме замещает историю, а не адресовано человеку. При стриминге оно
+    # печаталось в терминал целиком, и следом шёл отчёт о сворачивании —
+    # найдено живой проверкой, тестами до того не ловилось.
+    it "просит не показывать резюме на экране" do
+      compactor.call(talk)
+
+      expect(client).to have_received(:chat).with(anything, hash_including(visible: false))
     end
 
     it "отправляет модели весь диалог вместе с просьбой" do

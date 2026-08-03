@@ -63,6 +63,27 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  describe "#stream?" do
+    # Включён по умолчанию: на локальной модели ответ идёт десятки секунд,
+    # и неподвижный спиннер всё это время — худшее, что можно показать.
+    it "по умолчанию включён" do
+      expect(described_class.new({}, env: {}).stream?).to be(true)
+    end
+
+    it "выключается флагом --no-stream" do
+      expect(described_class.new({ stream: false }, env: {}).stream?).to be(false)
+    end
+
+    it "выключается через LLM_STREAM=false" do
+      expect(described_class.new({}, env: { "LLM_STREAM" => "false" }).stream?).to be(false)
+    end
+
+    # Флаг перебивает переменную окружения — общее правило приоритета.
+    it "позволяет флагу перебить LLM_STREAM" do
+      expect(described_class.new({ stream: true }, env: { "LLM_STREAM" => "false" }).stream?).to be(true)
+    end
+  end
+
   describe "#policy" do
     it "по умолчанию deny" do
       expect(described_class.new({}, env: {}).policy).to eq(:deny)

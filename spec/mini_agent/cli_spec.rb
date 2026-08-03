@@ -12,6 +12,15 @@ RSpec.describe MiniAgent::CLI do
     described_class.start(argv, out: out, input: input)
   end
 
+  # Ответ в том виде, в каком его получает пользователь: стриминг включён
+  # по умолчанию, и стаб с обычным JSON проверял бы путь, которым никто
+  # не ходит. Тесты самого разбора потока — в llm_client_spec.
+  def sse(content, finish_reason: "stop")
+    event = { "choices" => [{ "index" => 0, "delta" => { "content" => content },
+                              "finish_reason" => finish_reason }] }
+    "data: #{event.to_json}\n\ndata: [DONE]\n\n"
+  end
+
   describe "справка и версия" do
     it "печатает справку по --help с кодом 0" do
       expect(start(["--help"])).to eq(0)
@@ -64,10 +73,7 @@ RSpec.describe MiniAgent::CLI do
     let(:endpoint) { "http://cli.test/v1/chat/completions" }
 
     before do
-      stub_request(:post, endpoint).to_return(
-        status: 200,
-        body: { "choices" => [{ "message" => { "content" => "готово" } }] }.to_json
-      )
+      stub_request(:post, endpoint).to_return(status: 200, body: sse("готово"))
     end
 
     it "выполняет задачу и возвращает код 0" do
@@ -420,10 +426,7 @@ RSpec.describe MiniAgent::CLI do
 
   describe "интерактивный режим" do
     it "запускается и завершается по exit" do
-      stub_request(:post, "http://cli.test/v1/chat/completions").to_return(
-        status: 200,
-        body: { "choices" => [{ "message" => { "content" => "ответ" } }] }.to_json
-      )
+      stub_request(:post, "http://cli.test/v1/chat/completions").to_return(status: 200, body: sse("ответ"))
 
       code = start(["-i", "--base-url", "http://cli.test/v1"], input: StringIO.new("задача\nexit\n"))
 

@@ -53,8 +53,11 @@ module MiniAgent
       messages = conversation.to_a + [{ role: "user", content: Messages::COMPACT_REQUEST }]
 
       @ui.status = Messages::COMPACT_RUNNING
+      # visible: false — резюме замещает историю, а не адресовано человеку:
+      # при стриминге оно вываливалось на экран целиком, и следом шёл отчёт
+      # «сворачивать было нечего» (найдено живой проверкой).
       content, _tool_calls, usage, finish_reason =
-        @ui.with_spinner { @client.chat(messages, tool_choice: "none") }
+        @ui.with_spinner { @client.chat(messages, tool_choice: "none", visible: false) }
       # Расход на сворачивание в счёт входит: запрос сделан и оплачен.
       # Тот же принцип, что у провалившегося хода, — счётчик показывает,
       # что произошло, а не то, что осталось в истории.

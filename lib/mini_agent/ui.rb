@@ -24,19 +24,25 @@ module MiniAgent
     BRANCH = "⎿"
     INDENT = "    "
 
-    SPINNER_FRAMES = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
-    SPINNER_INTERVAL = 0.1
-
-    # Строка состояния для спиннера (например, «ход 2/10»). Меняется на
-    # каждой итерации цикла, поэтому передаётся присваиванием, а не через
-    # конструктор: объект UI один на всю сессию.
-    attr_writer :status
+    SPINNER_INTERVAL = Spinner::INTERVAL
 
     def initialize(out: $stdout, tty: nil, spinner_interval: SPINNER_INTERVAL)
       @out = out
       @tty = tty.nil? ? out.respond_to?(:tty?) && out.tty? : tty
-      @spinner_interval = spinner_interval
-      @status = nil
+      @spinner = Spinner.new(ui: self, enabled: @tty, interval: spinner_interval)
+      @streaming = false
+      @streamed = false
+    end
+
+    # Строка состояния (например, «ход 2/10») и ход генерации. Передаются
+    # присваиванием, а не через конструктор: значения меняются на каждой
+    # итерации, а объект UI один на всю сессию.
+    def status=(text)
+      @spinner.status = text
+    end
+
+    def progress=(text)
+      @spinner.progress = text
     end
 
     def tty? = @tty
@@ -50,8 +56,45 @@ module MiniAgent
       @out.flush if @out.respond_to?(:flush)
     end
 
+    # Ответ модели. При стриминге текст уже напечатан по кускам, и печатать
+    # его второй раз нельзя — признак снимается здесь, а не проверяется
+    # в Agent: тот про способ доставки знать не обязан, у него один вызов
+    # на оба режима.
     def assistant(content)
+      return @streamed = false if @streamed
+
       puts("\n#{paint(BULLET, :green)} #{content}")
+    end
+
+    # Кусок ответа модели по мере генерации.
+    #
+    # Спиннер гасится здесь, а не в вызывающем коде: он рисует себя в ту же
+    # строку и затирал бы первые знаки ответа. Маркер печатается один раз —
+    # у первого куска, дальше идёт голый текст, поэтому итоговый вид совпадает
+    # с обычным assistant.
+    def stream_chunk(text)
+      unless @streaming
+        stop_spinner
+        @streaming = true
+        print("\n#{paint(BULLET, :green)} ")
+      end
+
+      print(text)
+    end
+
+    # Ответ закончился. Перевод строки печатается только если что-то шло:
+    # на ответе из одних вызовов инструментов лишняя пустая строка разорвала
+    # бы блок «● Bash(...)» пополам.
+    def stream_finish
+      return unless @streaming
+
+      @streaming = false
+      # Показанный текст не должен печататься повторно: следом Agent зовёт
+      # assistant с тем же содержимым. Признак одноразовый — гасится первым
+      # же вызовом, иначе следующий ответ (например, из непотокового
+      # /compact) молча пропал бы.
+      @streamed = true
+      puts("")
     end
 
     def warn(text)
@@ -113,21 +156,12 @@ module MiniAgent
       end
     end
 
-    # Вне TTY поток не создаётся вообще: в логах и в тестах анимация не нужна,
-    # а лишний поток — источник недетерминированности.
-    def with_spinner
-      return yield unless @tty
+    def with_spinner(&) = @spinner.around(&)
 
-      stop = false
-      thread = spawn_spinner { stop }
-      begin
-        yield
-      ensure
-        stop = true
-        thread.join
-        print("\r\e[K")
-      end
-    end
+    # Погасить спиннер досрочно, не дожидаясь конца блока. Нужен стримингу:
+    # там ответ начинает печататься посреди запроса, а спиннер рисует себя
+    # в ту же строку.
+    def stop_spinner = @spinner.stop
 
     private
 
@@ -164,24 +198,6 @@ module MiniAgent
       return INDENT unless index.zero? && !code&.positive?
 
       "  #{paint(BRANCH, :gray)} "
-    end
-
-    def spawn_spinner(&stopped)
-      Thread.new do
-        index = 0
-        until stopped.call
-          print("\r#{paint("#{SPINNER_FRAMES[index % SPINNER_FRAMES.size]} #{spinner_text}", :cyan)}")
-          index += 1
-          sleep(@spinner_interval)
-        end
-      rescue IOError
-        # Поток вывода закрыли — анимация больше не нужна.
-        nil
-      end
-    end
-
-    def spinner_text
-      [Messages::THINKING, @status].compact.join(" ")
     end
   end
 end

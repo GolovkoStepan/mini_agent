@@ -285,6 +285,75 @@ RSpec.describe MiniAgent::UI do
         expect { ui.with_spinner { raise "сбой" } }.to raise_error("сбой")
         expect(Thread.list.size).to eq(before_count)
       end
+
+      # Ход размышлений: на рассуждающей модели их вдесятеро больше самого
+      # ответа, и без этой строки поток выглядел бы как обычное ожидание.
+      it "показывает ход размышлений" do
+        ui.progress = "(размышления: 240 знаков)"
+        ui.with_spinner { sleep 0.05 }
+
+        expect(out.string).to include("размышления: 240 знаков")
+      end
+
+      # Спиннер и текст ответа делят одну строку: без досрочной остановки
+      # анимация затирала бы первые знаки.
+      it "гасится досрочно и не мешает тексту" do
+        before_count = Thread.list.size
+
+        ui.with_spinner do
+          sleep 0.03
+          ui.stop_spinner
+          ui.stream_chunk("ответ")
+        end
+
+        expect(Thread.list.size).to eq(before_count)
+        expect(out.string).to end_with("ответ")
+      end
+
+      it "переживает повторную остановку" do
+        ui.with_spinner { ui.stop_spinner }
+
+        expect { ui.stop_spinner }.not_to raise_error
+      end
+    end
+  end
+
+  describe "потоковый вывод" do
+    it "печатает маркер один раз, а текст — по кускам" do
+      ui.stream_chunk("при")
+      ui.stream_chunk("вет")
+      ui.stream_finish
+
+      expect(out.string).to eq("\n● привет\n")
+    end
+
+    # Следом Agent зовёт assistant с тем же содержимым: показанный текст
+    # не должен печататься второй раз.
+    it "не печатает показанный текст повторно" do
+      ui.stream_chunk("привет")
+      ui.stream_finish
+      ui.assistant("привет")
+
+      expect(out.string.scan("привет").size).to eq(1)
+    end
+
+    # Признак одноразовый: иначе следующий ответ — например, непотоковое
+    # резюме /compact — молча пропал бы.
+    it "печатает следующий ответ как обычно" do
+      ui.stream_chunk("первый")
+      ui.stream_finish
+      ui.assistant("первый")
+      ui.assistant("второй")
+
+      expect(out.string).to include("второй")
+    end
+
+    # Ответ из одних вызовов инструментов текста не содержит: лишняя пустая
+    # строка разорвала бы блок «● Bash(...)» пополам.
+    it "молчит, когда текста не было вовсе" do
+      ui.stream_finish
+
+      expect(out.string).to eq("")
     end
   end
 end

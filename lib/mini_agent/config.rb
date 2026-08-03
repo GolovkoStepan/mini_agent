@@ -34,6 +34,11 @@ module MiniAgent
       # включают осознанно, а не получают по умолчанию.
       policy: :deny,
       allow_unsafe: false,
+      # Текст по мере генерации. Включён по умолчанию: на локальной модели
+      # ожидание ответа измеряется десятками секунд, и неподвижный спиннер
+      # всё это время — худшее, что можно показать. Выключается --no-stream,
+      # если сервер потока не умеет.
+      stream: true,
       timeout: 120,
       # Ожидание ответа модели. 120 секунд не хватало: на bonsai-27b (Q1_0,
       # рассуждающая) «17*23» заняло 347 секунд, а вопрос на три абзаца —
@@ -66,6 +71,7 @@ module MiniAgent
       llm_timeout: "LLM_TIMEOUT",
       policy: "AGENT_POLICY",
       allow_unsafe: "ALLOW_UNSAFE",
+      stream: "LLM_STREAM",
       timeout: "COMMAND_TIMEOUT",
       cwd: "AGENT_CWD",
       log: "AGENT_LOG"
@@ -89,6 +95,7 @@ module MiniAgent
       read_connection
       read_limits
       @policy = read_policy
+      @stream = to_bool(fetch(:stream))
       @cwd = expand_cwd(fetch(:cwd))
       @log = expand_log(fetch(:log))
     end
@@ -99,6 +106,11 @@ module MiniAgent
     # policy: :ask») пришлось бы разрешать угадыванием.
     def allow_unsafe?
       @policy == :unsafe
+    end
+
+    # Читать ответ по мере генерации.
+    def stream?
+      @stream
     end
 
     def chat_uri

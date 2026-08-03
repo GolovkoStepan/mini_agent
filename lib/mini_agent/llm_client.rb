@@ -21,6 +21,7 @@ module MiniAgent
       @sleeper = sleeper
       @http = nil
       @retry_after = nil
+      @stream = nil
     end
 
     # Держит одно соединение на всё время работы блока.
@@ -48,8 +49,30 @@ module MiniAgent
     # tool_choice: "none" нужен для финального суммирующего запроса — иначе
     # модель может вернуть очередной вызов инструмента, который уже некуда
     # применить, и он будет молча потерян.
-    def chat(messages, tools: [], tool_choice: "auto")
-      body = payload(messages, tools, tool_choice).to_json
+    #
+    # visible: false — ответ служебный и на экран при стриминге не идёт
+    # (см. StreamRequest). Отдельным признаком, а не выводом из
+    # tool_choice: совпадение этих двух условий сегодня случайно, и первый
+    # же служебный запрос с инструментами развёл бы их молча.
+    def chat(messages, tools: [], tool_choice: "auto", visible: true)
+      @visible = visible
+      body = ChatPayload.new(config: @config, messages: messages, tools: tools, tool_choice: tool_choice).to_json
+
+      attempts(body)
+    end
+
+    # Список моделей, загруженных на сервере: массив имён. Сам запрос живёт
+    # в ModelsRequest — это справочная команда без повторов, а не диалог.
+    def models
+      ModelsRequest.new(config: @config, http: connection).call
+    end
+
+    private
+
+    # Цикл повторов. Отделён от chat не ради метрики, а потому, что это
+    # разные вещи: там — что именно спросить у сервера, здесь — сколько раз
+    # и с какими паузами пытаться.
+    def attempts(body)
       last_error = nil
 
       @config.retry_count.times do |attempt|
@@ -72,14 +95,6 @@ module MiniAgent
       raise LLMError, format(Messages::LLM_FAILED, count: @config.retry_count, error: last_error)
     end
 
-    # Список моделей, загруженных на сервере: массив имён. Сам запрос живёт
-    # в ModelsRequest — это справочная команда без повторов, а не диалог.
-    def models
-      ModelsRequest.new(config: @config, http: connection).call
-    end
-
-    private
-
     # Единственная ошибка из RETRIABLE, которую повторять незачем: модель
     # не успела, и ещё два таких же ожидания дадут то же самое — при лимите
     # в 600 с это полчаса молчания. Про формулировку см. TIMEOUT_ERROR.
@@ -94,7 +109,20 @@ module MiniAgent
       request = Net::HTTP::Post.new(@config.chat_uri.path, headers)
       request.body = body
 
+      return stream(request) if @config.stream?
+
+      @stream = nil
       with_spinner { connection.request(request) }
+    end
+
+    # Потоковый ответ разбирается по мере чтения, поэтому к моменту возврата
+    # он уже собран: interpret возьмёт его из @stream вместо разбора тела.
+    # Ответ всё равно возвращается — по нему определяется код HTTP, и ветка
+    # ошибок остаётся общей для обоих режимов.
+    def stream(request)
+      response, parser = StreamRequest.new(http: connection, ui: @ui, visible: @visible).call(request)
+      @stream = parser
+      response
     end
 
     def headers
@@ -104,20 +132,6 @@ module MiniAgent
       }
     end
 
-    def payload(messages, tools, tool_choice)
-      body = {
-        model: @config.model,
-        messages: messages,
-        temperature: 0.1,
-        max_tokens: @config.max_tokens
-      }
-      unless tools.empty?
-        body[:tools] = tools
-        body[:tool_choice] = tool_choice
-      end
-      body
-    end
-
     # nil означает «попытка неудачна, нужен повтор»; причина кладётся
     # в @last_reason, чтобы не плодить возвращаемых значений.
     #
@@ -125,17 +139,27 @@ module MiniAgent
     # значило бы отправить запрос на повтор, а именно этого делать нельзя.
     def interpret(response, attempt)
       return handle_http_error(response, attempt) unless response.is_a?(Net::HTTPSuccess)
+      # Поток уже разобран по мере чтения — тела для повторного разбора нет.
+      return interpret_stream if @stream
 
-      data = JSON.parse(response.body)
-      message = extract_message(data)
-      message && result(data, message)
-    rescue JSON::ParserError => e
-      @ui&.error(format(Messages::INVALID_JSON, message: e.message))
-      @last_reason = format(Messages::INVALID_JSON, message: e.message)
+      parsed, reason = ChatResponse.parse(response.body)
+      return parsed.to_a if parsed
+
+      @ui&.error(reason)
+      @last_reason = reason
       nil
     end
 
-    def result(data, message) = ChatResponse.new(data, message).to_a
+    # Пустой поток — не пустой ответ модели, а несостоявшийся; что это
+    # значит и почему их нельзя путать, см. StreamParser#empty?. Здесь
+    # остаётся решение: такую попытку следует повторить.
+    def interpret_stream
+      return @stream.to_a unless @stream.empty?
+
+      @ui&.error(Messages::EMPTY_STREAM)
+      @last_reason = Messages::EMPTY_STREAM
+      nil
+    end
 
     # Повторяемый код — nil и обычный цикл повторов; неповторяемый — сразу
     # LLMError, чтобы не ждать retry_delay ради заведомо того же ответа.
@@ -151,24 +175,6 @@ module MiniAgent
       @last_reason = error.to_s
       @retry_after = error.retry_after
       nil
-    end
-
-    def extract_message(data)
-      choices = data["choices"]
-      unless choices.is_a?(Array) && !choices.empty?
-        @ui&.error(Messages::INVALID_CHOICES)
-        @last_reason = Messages::INVALID_CHOICES
-        return nil
-      end
-
-      message = choices[0]["message"]
-      unless message.is_a?(Hash)
-        @ui&.error(Messages::EMPTY_MESSAGE)
-        @last_reason = Messages::EMPTY_MESSAGE
-        return nil
-      end
-
-      message
     end
 
     # Соединение поднимается лениво: в исходном скрипте вызов run без

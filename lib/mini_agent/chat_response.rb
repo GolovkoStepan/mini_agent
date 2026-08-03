@@ -15,6 +15,26 @@ module MiniAgent
     # его, они возвращают пустой content — неотличимый от «нечего сказать».
     TRUNCATED = "length"
 
+    # Разобрать тело ответа либо назвать причину, по которой не вышло.
+    # Возвращает [ответ, nil] или [nil, причина].
+    #
+    # Живёт здесь, а не в LLMClient: знание о том, что choices — непустой
+    # массив, а message внутри него — объект, это раскладка ответа, то есть
+    # ровно та задача, ради которой класс и выделялся. Клиенту остаётся
+    # решение, что делать с причиной, — показать и повторить.
+    def self.parse(body)
+      data = JSON.parse(body)
+      choices = data["choices"]
+      return [nil, Messages::INVALID_CHOICES] unless choices.is_a?(Array) && !choices.empty?
+
+      message = choices[0]["message"]
+      return [nil, Messages::EMPTY_MESSAGE] unless message.is_a?(Hash)
+
+      [new(data, message), nil]
+    rescue JSON::ParserError => e
+      [nil, format(Messages::INVALID_JSON, message: e.message)]
+    end
+
     def initialize(data, message)
       @data = data
       @message = message
