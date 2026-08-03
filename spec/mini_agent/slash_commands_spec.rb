@@ -103,4 +103,69 @@ RSpec.describe MiniAgent::SlashCommands do
       expect(commands.call("/clear")).to eq(:clear)
     end
   end
+
+  describe "/context" do
+    let(:conversation) do
+      MiniAgent::Conversation.new(system_prompt: "промпт").tap do |talk|
+        talk.user("почини тесты")
+        talk.assistant("готово")
+      end
+    end
+
+    it "показывает разбивку по категориям" do
+      expect(commands.call("/context", conversation: conversation)).to eq(:handled)
+
+      expect(out.string).to include("системный промпт", "задачи", "ответы модели", "всего")
+    end
+
+    # История принадлежит Repl и меняется по /clear и /compact. Хранить её
+    # в поле значило бы синхронизировать два места; отчёт по устаревшей
+    # истории был бы неотличим от верного.
+    it "берёт историю из аргумента, а не из своего состояния" do
+      other = MiniAgent::Conversation.new(system_prompt: "промпт")
+      other.user("совсем другая задача")
+
+      commands.call("/context", conversation: conversation)
+      commands.call("/context", conversation: other)
+
+      # Три сообщения в первой истории, два во второй: отчёт следует
+      # за переданной историей, а не за запомненной.
+      expect(out.string.scan(/Контекст: (\d+)/).flatten).to eq(%w[3 2])
+    end
+
+    it "без истории не падает" do
+      expect(commands.call("/context")).to eq(:handled)
+      expect(out.string).to include("пуст")
+    end
+
+    context "с расходом токенов" do
+      let(:usage) { MiniAgent::Usage.new }
+
+      subject(:commands) { described_class.new(config: config, tools: tools, ui: ui, usage: usage) }
+
+      it "показывает размер промпта по данным сервера" do
+        usage.add({ "prompt_tokens" => 57, "completion_tokens" => 7 })
+
+        commands.call("/context", conversation: conversation)
+
+        expect(out.string).to include("57 токенов")
+      end
+
+      # Ноль означал бы «промпт пустой». Сервер мог не прислать usage вовсе —
+      # это другое, и говорить об этом надо иначе.
+      it "молчит о токенах, когда сервер их не присылал" do
+        commands.call("/context", conversation: conversation)
+
+        expect(out.string).to include("не сообщал")
+      end
+    end
+  end
+
+  describe "/compact" do
+    # Сворачивание идёт к модели, а у команд нет ни клиента, ни History:
+    # это работа агента, здесь только вердикт.
+    it "просит свернуть диалог" do
+      expect(commands.call("/compact")).to eq(:compact)
+    end
+  end
 end

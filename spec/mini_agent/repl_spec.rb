@@ -145,6 +145,73 @@ RSpec.describe MiniAgent::Repl do
       expect(conversation.to_a.first[:content]).to include("тесты: make spec")
     end
 
+    describe "/context" do
+      it "показывает разбивку по накопленной истории" do
+        allow(client).to receive(:chat).and_return(["ответ", []])
+
+        repl("задача\n/context\nexit\n").run
+
+        expect(out.string).to include("Контекст:", "системный промпт", "задачи")
+      end
+
+      it "не ходит к модели" do
+        allow(client).to receive(:chat)
+
+        repl("/context\nexit\n").run
+
+        expect(client).not_to have_received(:chat)
+      end
+    end
+
+    describe "/compact" do
+      # Главное про эту ветку: свёрнутая история должна уехать в следующую
+      # итерацию цикла. Вернуть здесь прежнюю conversation — значит молча
+      # продолжить со старой историей, и снаружи это выглядело бы работающим.
+      it "заменяет историю резюме и продолжает с ней" do
+        allow(client).to receive(:chat).and_return(
+          ["первый ответ", []], ["резюме диалога", []], ["второй ответ", []]
+        )
+
+        conversation = repl("задача 1\n/compact\nзадача 2\nexit\n").run
+
+        expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user user assistant])
+        expect(conversation.to_a[1][:content]).to include("резюме диалога")
+      end
+
+      # Отказ сворачивания — не отказ сессии: работать можно дальше
+      # с той историей, что была.
+      it "при ошибке оставляет прежнюю историю и не выходит" do
+        responses = [
+          -> { ["первый ответ", []] },
+          -> { raise MiniAgent::LLMError, "сервер недоступен" },
+          -> { ["второй ответ", []] }
+        ]
+        allow(client).to receive(:chat) { responses.shift.call }
+
+        conversation = repl("задача 1\n/compact\nзадача 2\nexit\n").run
+
+        expect(out.string).to include("Не удалось свернуть", "второй ответ")
+        expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user assistant user assistant])
+      end
+
+      # /compact собирает историю заново — тем же путём, что и /clear,
+      # и с теми же граблями: описание проекта и журнал должны уехать в неё.
+      it "сохраняет описание проекта и журнал" do
+        allow(client).to receive(:chat).and_return(["ответ", []], ["резюме", []])
+        transcript = instance_spy(MiniAgent::Transcript)
+        agent = MiniAgent::Agent.new(
+          config: config, client: client, tools: tools, ui: ui,
+          history: MiniAgent::History.new(project_context: "тесты: make spec", transcript: transcript)
+        )
+        reader = MiniAgent::LineReader.new(input: StringIO.new("задача\n/compact\nexit\n"), output: out)
+
+        conversation = described_class.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader).run
+
+        expect(conversation.to_a.first[:content]).to include("тесты: make spec")
+        expect(transcript).to have_received(:compact).with(hash_including(:before))
+      end
+    end
+
     # Раньше упавшая задача оставляла в истории сообщение без ответа, и на
     # переполненном контексте следующая падала тем же образом — сессия
     # оставалась мёртвой до /clear. Теперь работать можно дальше.

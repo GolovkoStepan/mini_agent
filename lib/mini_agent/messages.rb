@@ -60,6 +60,45 @@ module MiniAgent
     # Сообщение, которое подставляется в историю при достижении лимита ходов.
     STOP_MAX_TURNS = "Stop: maximum turns reached. Summarize current progress."
 
+    # Просьба свернуть диалог (/compact) и оболочка для готового резюме.
+    #
+    # Обе строки уходят МОДЕЛИ, а не человеку, — как и STOP_MAX_TURNS выше,
+    # и по тем же правилам: правка здесь меняет вход модели.
+    #
+    # В просьбе перечислено, что должно уцелеть, потому что без перечня
+    # модели сворачивают диалог в аннотацию вида «обсуждали рефакторинг»:
+    # красиво, коротко и бесполезно для продолжения работы. Ценны как раз
+    # частности — какие файлы правились, что уже проверено, что осталось.
+    COMPACT_REQUEST = <<~PROMPT
+      Summarize this entire conversation into a compact handover note.
+      It will REPLACE the conversation: everything you omit is lost.
+
+      Keep, in this order:
+      1. What the user asked for — the actual goal, in their terms.
+      2. What was already done: files created or changed (exact paths),
+         commands run and their outcome, decisions made and why.
+      3. Current state: what works, what is broken, what was verified.
+      4. What remains to be done next.
+
+      Prefer concrete details over description of the discussion. Keep exact
+      names, paths and commands verbatim — they are what makes the note usable.
+      Do not address the user. Write the note only, no preamble.
+    PROMPT
+
+    # Резюме кладётся в новую историю ролью user: system-сообщение уже занято
+    # промптом и описанием проекта, а второе шаблоны чата ряда моделей
+    # не принимают. Разметка нужна, чтобы модель не приняла пересказ
+    # за новую задачу.
+    COMPACT_SUMMARY = <<~PROMPT
+      <conversation_summary>
+      This is a summary of the earlier conversation, which was compacted to
+      save context. Treat it as your own memory of what happened, not as a
+      task. Wait for the user's next message.
+
+      %<content>s
+      </conversation_summary>
+    PROMPT
+
     # Строки, которые получает МОДЕЛЬ, а не человек: результат инструмента и
     # сообщения об ошибках его вызова. Менять их — значит менять вход модели,
     # поэтому оформление здесь живёт отдельно от оформления терминала.
@@ -118,7 +157,8 @@ module MiniAgent
     # это внутренняя бухгалтерия агента, в логе работы она не нужна.
     TURN = "ход %<number>d/%<total>d"
     EXIT_CODE_LABEL = "код выхода %<code>d"
-    OUTPUT_ELLIPSIS = "… +%<count>d строк"
+    OUTPUT_ELLIPSIS = "… +%<count>s"
+    LINES = %w[строка строки строк].freeze
     LLM_CONNECTION_FAILED = "Ошибка связи с LLM: %<message>s"
     # Соединение не открылось вообще — агент не стартовал. Показываем адрес
     # и способ его сменить: значение по умолчанию указывает на чужой сервер,
@@ -170,7 +210,9 @@ module MiniAgent
     CMD_USAGE = "расход токенов за сессию"
     CMD_EXIT = "выход"
     CMD_HELP_HEADER = "Команды:"
-    CMD_HELP_LINE = "  /%<name>-6s %<summary>s"
+    # Ширина колонки — по самой длинной команде (/context, /compact).
+    # Меньше — и описания разъезжаются на две ширины сразу.
+    CMD_HELP_LINE = "  /%<name>-8s %<summary>s"
     CMD_MODEL_LINE = "Модель:  %<model>s"
     CMD_SERVER_LINE = "Сервер:  %<url>s"
     CMD_CWD_LINE = "Каталог: %<path>s"
@@ -184,6 +226,60 @@ module MiniAgent
     CMD_USAGE_CONTEXT = "  контекст сейчас: %<count>d (запросов: %<requests>d)"
     CMD_USAGE_EMPTY = "Запросов к модели ещё не было."
     CMD_CLEARED = "История очищена."
+
+    # --- /context ---
+    # Числительные согласуются через Plural: «34 знака», а не «34 знаков».
+    # В интерфейсе, где всё остальное выверено, несогласованное число
+    # читается как недоделка. Найдено живой проверкой.
+    CHARS = %w[знак знака знаков].freeze
+    MESSAGES_WORD = %w[сообщение сообщения сообщений].freeze
+    TOKENS = %w[токен токена токенов].freeze
+
+    CMD_CONTEXT = "из чего складывается контекст"
+    CMD_CONTEXT_HEADER = "Контекст: %<count>s"
+    # Ширина колонки со знаками задана с запасом под слово: «знаков» длиннее
+    # «знака», и без выравнивания проценты разъезжались бы по строкам.
+    CMD_CONTEXT_LINE = "  %<name>-18s %<size>15s  %<share>3d%%"
+    CMD_CONTEXT_TOTAL = "  %<name>-18s %<size>15s"
+    CMD_CONTEXT_RULE = "  ------------------------------------"
+    CMD_CONTEXT_TOTAL_NAME = "всего"
+    # Названия категорий отдельно от ключей: ключи — код, это интерфейс.
+    CMD_CONTEXT_NAMES = {
+      system: "системный промпт",
+      project: "описание проекта",
+      tasks: "задачи",
+      answers: "ответы модели",
+      tools: "результаты команд"
+    }.freeze
+    # Единственное честное число о токенах присылает сервер. Свой пересчёт
+    # знаков в токены отвергнут: коэффициент для русского и для кода разный,
+    # ошибка в полтора-два раза, а выглядит такая оценка как измерение.
+    CMD_CONTEXT_TOKENS = "  по данным сервера последний промпт — %<count>s"
+    CMD_CONTEXT_NO_TOKENS = "  сервер не сообщал размер промпта в токенах"
+    CMD_CONTEXT_EMPTY = "Контекст пуст."
+    # Показывается, когда место занято тем, что переживёт сворачивание.
+    # Молчать нельзя: пользователь позовёт /compact и не поймёт, почему
+    # не помогло.
+    # Без ведущих пробелов, в отличие от строк таблицы выше: печатается через
+    # UI#warn, а тот уже ставит свой маркер с отступом.
+    CMD_CONTEXT_FIXED = "Больше половины занимает описание проекта — /compact его не тронет."
+
+    # --- /compact ---
+    CMD_COMPACT = "свернуть диалог в резюме"
+    COMPACT_RUNNING = "Сворачиваю диалог…"
+    COMPACT_DONE = "Диалог свёрнут: %<before>s → %<after>d."
+    # Резюме с обёрткой оказалось длиннее пары реплик, которые заменило.
+    # Называем своим именем: числа тут же рядом, и «свёрнут» выглядело бы
+    # ложью в мелочи.
+    COMPACT_GREW = "Диалог был слишком коротким: %<before>s → %<after>d, сворачивать было нечего."
+    COMPACT_NOTHING = "Сворачивать нечего: диалог ещё не начался."
+    COMPACT_EMPTY = "Модель вернула пустое резюме. История оставлена как была."
+    COMPACT_FAILED = "Не удалось свернуть диалог: %<message>s. История оставлена как была."
+    # Больше половины занимает описание проекта: второй /compact не даст
+    # ничего, лечится только правкой файла.
+    COMPACT_PROJECT_DOMINATES = "Больше половины остатка — описание проекта; уменьшить его можно только правкой файла."
+    # Прервали Ctrl+C во время запроса резюме: история цела.
+    COMPACT_INTERRUPTED = "Сворачивание прервано. История сохранена."
     CMD_UNKNOWN = "Неизвестная команда: /%<name>s. /help — список."
     # Ctrl+C прерывает задачу, а не сессию: история цела, можно продолжать.
     TASK_INTERRUPTED = "Прервано. История сохранена."

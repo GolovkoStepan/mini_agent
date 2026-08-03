@@ -20,9 +20,19 @@ module MiniAgent
     def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil, transcript: nil)
       @messages = []
       @transcript = transcript
+      @project_context_size = 0
       prompt = build_prompt(system_prompt, project_context)
       system(prompt) if prompt
     end
+
+    # Сколько знаков системного сообщения занимает описание проекта.
+    #
+    # Запоминается при сборке, а не вычисляется потом разбором готового
+    # промпта по образцу разметки: пара «формат и его разбор» уже есть
+    # в проекте (EXIT_CODE / EXIT_CODE_PATTERN) и держится рядом только
+    # под присмотром. Заводить вторую такую пару ради одной цифры значит
+    # создать место, которое молча разойдётся при первой правке разметки.
+    attr_reader :project_context_size
 
     def system(content)
       push({ role: "system", content: content })
@@ -108,6 +118,7 @@ module MiniAgent
       return system_prompt if project_context.nil? || project_context.strip.empty?
 
       block = format(Messages::PROJECT_CONTEXT, content: project_context.strip)
+      @project_context_size = block.length
       "#{system_prompt}#{block}"
     end
 

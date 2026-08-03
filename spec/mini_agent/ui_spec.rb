@@ -55,6 +55,14 @@ RSpec.describe MiniAgent::UI do
       expect(out.string).to include("… +45 строк")
     end
 
+    # «+1 строк» — та же недоделка, что и «34 знаков», просто замеченная
+    # позже: 45 скрытых строк случайно попадали в верную форму.
+    it "согласует число скрытых строк" do
+      ui.tool_result((1..6).map { |i| "строка #{i}" }.join("\n"))
+
+      expect(out.string).to include("… +1 строка")
+    end
+
     # Код выхода нужен модели всегда, человеку — только когда команда упала.
     it "не показывает нулевой код выхода" do
       ui.tool_result("Код выхода: 0\nвсё хорошо\n")
@@ -83,6 +91,70 @@ RSpec.describe MiniAgent::UI do
       ui.tool_result("Код выхода: 0\n     150 agent.rb\n      46 color.rb\n")
 
       expect(out.string).to include("⎿      150 agent.rb")
+    end
+  end
+
+  describe "#context" do
+    def report(project_context: nil, usage: nil)
+      talk = MiniAgent::Conversation.new(system_prompt: "промпт", project_context: project_context)
+      talk.user("почини тесты")
+      MiniAgent::ContextReport.new(talk, usage: usage)
+    end
+
+    it "печатает категории, доли и итог" do
+      ui.context(report)
+
+      expect(out.string).to include("Контекст: 2 сообщения", "системный промпт", "задачи", "всего", "%")
+    end
+
+    # «34 знаков» в целиком русском интерфейсе читается как недоделка ровно
+    # там, где всё остальное выверено. Найдено живой проверкой /context.
+    it "согласует числительные" do
+      talk = MiniAgent::Conversation.new(system_prompt: "a" * 34)
+      talk.user("b")
+
+      ui.context(MiniAgent::ContextReport.new(talk))
+
+      expect(out.string).to include("34 знака", "1 знак", "35 знаков")
+      expect(out.string).not_to include("34 знаков", "1 знаков")
+    end
+
+    it "показывает описание проекта отдельной строкой" do
+      ui.context(report(project_context: "тесты: make spec"))
+
+      expect(out.string).to include("описание проекта")
+    end
+
+    it "печатает токены по данным сервера" do
+      usage = MiniAgent::Usage.new
+      usage.add({ "prompt_tokens" => 57, "completion_tokens" => 7 })
+
+      ui.context(report(usage: usage))
+
+      expect(out.string).to include("57 токенов")
+    end
+
+    # Ноль означал бы «промпт пустой», а не «измерить нечем».
+    it "без данных сервера говорит об этом прямо, а не печатает ноль" do
+      ui.context(report)
+
+      expect(out.string).to include("не сообщал")
+      expect(out.string).not_to include("0 токенов")
+    end
+
+    it "на пустом контексте не рисует таблицу" do
+      empty = MiniAgent::ContextReport.new(MiniAgent::Conversation.new(system_prompt: nil))
+
+      ui.context(empty)
+
+      expect(out.string).to include("пуст")
+      expect(out.string).not_to include("всего")
+    end
+
+    it "предупреждает, когда место занято описанием проекта" do
+      ui.context(report(project_context: "описание " * 200))
+
+      expect(out.string).to include("/compact его не тронет")
     end
   end
 

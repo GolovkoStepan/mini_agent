@@ -91,6 +91,7 @@ module MiniAgent
     def session: (Config config) -> void
     def message: (message) -> void
     def rollback: (Integer count) -> void
+    def compact: (before: Integer) -> void
     def close: () -> void
   end
 
@@ -114,7 +115,35 @@ module MiniAgent
     def empty?: () -> bool
     def mark: () -> Integer
     def rollback: (Integer mark) -> Integer
+    def project_context_size: () -> Integer
     def self.tool_call_id: (tool_call) -> String
+  end
+
+  module Plural
+    def self.form: (Integer count, String one, String few, String many) -> String
+    def self.with: (Integer count, String one, String few, String many) -> String
+  end
+
+  class ContextReport
+    type category = :system | :project | :tasks | :answers | :tools
+
+    CATEGORIES: Array[category]
+
+    def initialize: (Conversation conversation, ?usage: Usage?) -> void
+    def sizes: () -> Hash[category, Integer]
+    def messages: () -> Integer
+    def total: () -> Integer
+    def empty?: () -> bool
+    def share: (category) -> Integer
+    def fixed: () -> Integer
+    def compactable: () -> Integer
+    def project_dominates?: () -> bool
+    def tokens: () -> Integer?
+  end
+
+  class Compactor
+    def initialize: (client: LLMClient, history: History, ui: UI, ?usage: Usage?) -> void
+    def call: (Conversation conversation) -> Conversation
   end
 
   class ProcessRunner
@@ -189,6 +218,7 @@ module MiniAgent
     def puts: (?untyped text) -> void
     def print: (untyped text) -> void
     def assistant: (String content) -> void
+    def context: (ContextReport report) -> void
     def models: (Array[String] names, selected: String, url: String) -> void
     def warn: (String text) -> void
     def error: (String text) -> void
@@ -232,6 +262,7 @@ module MiniAgent
 
     def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History) -> void
     def new_conversation: () -> Conversation
+    def compact: (Conversation conversation) -> Conversation
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def failed?: () -> bool
     def usage: () -> Usage
@@ -249,12 +280,16 @@ module MiniAgent
   end
 
   class SlashCommands
+    # Команды, меняющие состояние сессии: исполняет их Repl, а не сами команды.
+    type verdict = :clear | :compact | :exit
+
     PATTERN: Regexp
     BARE_EXIT: Array[String]
     COMMANDS: Hash[String, String]
+    VERDICTS: Hash[String, verdict]
 
     def initialize: (config: Config, tools: ToolRegistry, ui: UI, ?usage: Usage) -> void
-    def call: (String? line) -> (:task | :handled | :clear | :exit)
+    def call: (String? line, ?conversation: Conversation?) -> (:task | :handled | verdict)
   end
 
   class Repl

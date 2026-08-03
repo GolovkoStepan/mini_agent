@@ -67,11 +67,18 @@ module MiniAgent
     end
 
     # Возвращает историю для следующей итерации либо :exit.
+    #
+    # Ветки :clear и :compact обе отдают НОВУЮ историю, и возвращаемое
+    # значение здесь не формальность: именно оно уезжает в следующую
+    # итерацию цикла. Вернуть conversation вместо результата — значит
+    # продолжить работу со старой историей, ничего при этом не сломав
+    # заметно.
     def handle(task, conversation)
-      case @commands.call(task)
+      case @commands.call(task, conversation: conversation)
       when :exit then :exit
       when :handled then conversation
       when :clear then clear
+      when :compact then @agent.compact(conversation)
       else
         @agent.run(task, conversation: conversation)
         conversation

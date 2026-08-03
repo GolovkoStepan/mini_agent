@@ -121,4 +121,21 @@ RSpec.describe MiniAgent::Transcript do
       expect(records.last["removed"]).to eq(1)
     end
   end
+
+  # Как и при откате: свёрнутые сообщения из файла не вычёркиваются — они
+  # действительно уходили модели. Без отметки лог выглядел бы так, будто
+  # модель ни с того ни с сего получила пересказ собственного разговора.
+  describe "сворачивание диалога" do
+    it "отмечает сворачивание, сохраняя свёрнутые сообщения" do
+      log = described_class.new(path)
+      log.message({ role: "user", content: "почини тесты" })
+      log.compact(before: 1500)
+      log.message({ role: "user", content: "<conversation_summary>…" })
+      log.close
+
+      expect(records.map { |r| r["type"] }).to eq(%w[message compact message])
+      expect(records.first["content"]).to eq("почини тесты")
+      expect(records[1]["before"]).to eq(1500)
+    end
+  end
 end

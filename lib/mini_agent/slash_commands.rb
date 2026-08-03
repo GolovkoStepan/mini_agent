@@ -18,11 +18,29 @@ module MiniAgent
     # единственный способ выйти, и он наверняка остался в пальцах.
     BARE_EXIT = %w[exit quit].freeze
 
+    # Команды, меняющие состояние сессии: здесь они не выполняются, а только
+    # называются. Историей и выходом владеет Repl, а сворачивание вдобавок
+    # идёт к модели — ни клиента, ни History у команд нет и заводить их тут
+    # незачем.
+    #
+    # Таблицей, а не ветками case: эти команды объединяет то, что тело у них
+    # пустое, и case из одних `then :symbol` — просто менее удобный способ
+    # написать хеш. Печатающие команды остались в report ниже: там у каждой
+    # есть что делать.
+    VERDICTS = {
+      "clear" => :clear,
+      "compact" => :compact,
+      "exit" => :exit,
+      "quit" => :exit
+    }.freeze
+
     # Список для /help. Разбор идёт case-ом ниже, и рассинхронизацию этих
     # двух мест ловит тест: каждое имя отсюда должно распознаваться.
     COMMANDS = {
       "help" => Messages::CMD_HELP,
       "clear" => Messages::CMD_CLEAR,
+      "context" => Messages::CMD_CONTEXT,
+      "compact" => Messages::CMD_COMPACT,
       "model" => Messages::CMD_MODEL,
       "tools" => Messages::CMD_TOOLS,
       "usage" => Messages::CMD_USAGE,
@@ -41,29 +59,51 @@ module MiniAgent
 
     # Возвращает, что делать вызывающему: :task — отдать модели,
     # :handled — команда уже отработала, :clear — начать историю заново,
-    # :exit — выйти из режима.
-    def call(line)
+    # :compact — свернуть диалог, :exit — выйти из режима.
+    #
+    # conversation нужна тем командам, которые смотрят на историю (/context).
+    # Передаётся аргументом, а не хранится в поле: владеет ею Repl, и она
+    # там меняется — по /clear и /compact заводится новая. Поле пришлось бы
+    # синхронизировать, и первый же пропущенный случай дал бы отчёт
+    # по устаревшей истории, причём молча.
+    def call(line, conversation: nil)
       text = line.to_s.strip
       return :exit if BARE_EXIT.include?(text.downcase)
 
       match = PATTERN.match(text)
       return :task unless match
 
-      dispatch(match[1].downcase)
+      dispatch(match[1].downcase, conversation)
     end
 
     private
 
-    def dispatch(name)
+    def dispatch(name, conversation)
+      VERDICTS[name] || report(name, conversation)
+    end
+
+    # Печатающие команды: всё, что они делают, происходит здесь и сейчас.
+    def report(name, conversation)
       case name
       when "help" then help
-      when "clear" then :clear
+      when "context" then context(conversation)
       when "model" then model
       when "tools" then tools
       when "usage" then usage
-      when "exit", "quit" then :exit
       else unknown(name)
       end
+    end
+
+    def context(conversation)
+      return empty_context if conversation.nil?
+
+      @ui.context(ContextReport.new(conversation, usage: @usage))
+      :handled
+    end
+
+    def empty_context
+      @ui.puts(Messages::CMD_CONTEXT_EMPTY)
+      :handled
     end
 
     def help

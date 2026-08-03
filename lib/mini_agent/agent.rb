@@ -29,6 +29,16 @@ module MiniAgent
     # добавлять и там — молча теряясь при первой же очистке.
     def new_conversation = @history.build
 
+    # Свернуть диалог в резюме (/compact). Возвращает новую историю либо
+    # прежнюю, если свернуть не удалось.
+    #
+    # Живёт у агента, а не у Repl, только ради доступа к клиенту, History
+    # и счётчику токенов: собирать их в Repl заново значило бы продублировать
+    # половину AgentBuilder. Сама работа — в Compactor; здесь один вызов.
+    def compact(conversation)
+      Compactor.new(client: @client, history: @history, ui: @ui, usage: @usage).call(conversation)
+    end
+
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
     # это позволяет интерактивному режиму продолжать диалог с накопленной
     # историей, передавая её обратно через conversation:.
