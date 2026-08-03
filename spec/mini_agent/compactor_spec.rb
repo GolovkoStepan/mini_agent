@@ -16,8 +16,8 @@ RSpec.describe MiniAgent::Compactor do
     end
   end
 
-  def answer(content, usage: nil)
-    allow(client).to receive(:chat).and_return([content, [], usage])
+  def answer(content, usage: nil, finish_reason: nil)
+    allow(client).to receive(:chat).and_return([content, [], usage, finish_reason])
   end
 
   describe "успешное сворачивание" do
@@ -114,6 +114,28 @@ RSpec.describe MiniAgent::Compactor do
 
       expect_history_intact(original, compactor.call(original))
       expect(out.string).to include("пустое резюме")
+    end
+
+    # Обрыв здесь опаснее, чем на обычном ходу: резюме ЗАМЕЩАЕТ историю,
+    # и обрезанное на полуслове молча унесло бы часть диалога навсегда.
+    it "при обрыве резюме по лимиту оставляет историю как была" do
+      answer("Пользователь просил починить те", finish_reason: "length")
+      original = talk
+
+      expect_history_intact(original, compactor.call(original))
+      expect(out.string).to include("Резюме оборвано")
+    end
+
+    # Обрыв съедает бюджет размышлениями и оставляет content пустым: жалоба
+    # на «пустое резюме» уводила бы от причины. Найдено живой проверкой —
+    # стабы этот случай пропустили, потому что задавали обрыв с текстом.
+    it "при обрыве без текста называет лимит, а не пустое резюме" do
+      answer("", finish_reason: "length")
+      original = talk
+
+      expect_history_intact(original, compactor.call(original))
+      expect(out.string).to include("оборвано на лимите")
+      expect(out.string).not_to include("пустое резюме")
     end
 
     it "при nil в ответе оставляет историю как была" do

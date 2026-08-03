@@ -10,10 +10,12 @@ RSpec.describe MiniAgent::LLMClient do
 
   subject(:client) { described_class.new(config: config) }
 
-  def chat_response(content: "готово", tool_calls: nil, usage: nil)
+  def chat_response(content: "готово", tool_calls: nil, usage: nil, finish_reason: nil)
     message = { "role" => "assistant", "content" => content }
     message["tool_calls"] = tool_calls if tool_calls
-    body = { "choices" => [{ "message" => message }] }
+    choice = { "message" => message }
+    choice["finish_reason"] = finish_reason if finish_reason
+    body = { "choices" => [choice] }
     body["usage"] = usage if usage
     body.to_json
   end
@@ -28,6 +30,25 @@ RSpec.describe MiniAgent::LLMClient do
 
       expect(content).to eq("готово")
       expect(tool_calls).to eq([])
+    end
+
+    # finish_reason лежит в choices рядом с message, а не внутри него.
+    # Без него обрезанный ответ неотличим от полного.
+    it "отдаёт finish_reason четвёртым элементом" do
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response(finish_reason: "length"))
+
+      *, finish_reason = client.chat(messages)
+
+      expect(finish_reason).to eq("length")
+    end
+
+    # Поле необязательное — его отсутствие не должно выглядеть как обрыв.
+    it "отдаёт nil, когда сервер не прислал finish_reason" do
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response)
+
+      *, finish_reason = client.chat(messages)
+
+      expect(finish_reason).to be_nil
     end
 
     # Расход токенов сервер кладёт рядом с choices, а не внутрь сообщения.

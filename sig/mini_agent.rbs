@@ -246,6 +246,18 @@ module MiniAgent
     def call: () -> Array[String]
   end
 
+  class ChatResponse
+    TRUNCATED: String
+
+    def initialize: (json_object data, json_object message) -> void
+    def content: () -> String
+    def tool_calls: () -> Array[tool_call]
+    def usage: () -> json_object?
+    def finish_reason: () -> String?
+    def truncated?: () -> bool
+    def to_a: () -> [String, Array[tool_call], json_object?, String?]
+  end
+
   class LLMClient
     RETRIABLE: Array[Class]
     OPEN_TIMEOUT: Integer
@@ -253,7 +265,7 @@ module MiniAgent
 
     def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped) -> void
     def start: [T] () { (LLMClient) -> T } -> T
-    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call], json_object?]
+    def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String) -> [String, Array[tool_call], json_object?, String?]
     def models: () -> Array[String]
   end
 

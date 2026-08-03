@@ -36,11 +36,15 @@ module MiniAgent
       @http = nil
     end
 
-    # Возвращает [content, tool_calls, usage].
+    # Возвращает [content, tool_calls, usage, finish_reason].
     #
     # usage — сырой хеш из ответа (`prompt_tokens`, `completion_tokens`) либо
     # nil: спецификация его не требует, и не всякий сервер присылает. Здесь он
     # не разбирается — учётом занимается Usage, клиенту это чужая забота.
+    #
+    # finish_reason отдаётся сырой строкой по той же причине: клиент сообщает
+    # факт, а решает по нему Agent — обрыв на пустом ответе и обрыв на готовом
+    # тексте требуют разного.
     #
     # tool_choice: "none" нужен для финального суммирующего запроса — иначе
     # модель может вернуть очередной вызов инструмента, который уже некуда
@@ -117,14 +121,14 @@ module MiniAgent
 
       data = JSON.parse(response.body)
       message = extract_message(data)
-      return nil unless message
-
-      [(message["content"] || "").strip, message["tool_calls"] || [], data["usage"]]
+      message && result(data, message)
     rescue JSON::ParserError => e
       @ui&.error(format(Messages::INVALID_JSON, message: e.message))
       @last_reason = format(Messages::INVALID_JSON, message: e.message)
       nil
     end
+
+    def result(data, message) = ChatResponse.new(data, message).to_a
 
     # Повторяемый код — nil и обычный цикл повторов; неповторяемый — сразу
     # LLMError, чтобы не ждать retry_delay ради заведомо того же ответа.

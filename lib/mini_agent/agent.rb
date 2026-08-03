@@ -68,29 +68,38 @@ module MiniAgent
         # в логе работы эта бухгалтерия не нужна.
         @ui.status = format(Messages::TURN, number: index + 1, total: @config.max_turns)
 
-        content, tool_calls, usage = request(conversation)
+        content, tool_calls, usage, finish_reason = request(conversation)
         return recover(conversation, mark) if content.nil?
 
         @ui.assistant(content) unless content.empty?
 
-        return finish(conversation, content, usage) if tool_calls.empty?
+        return finish(conversation, content, usage, finish_reason) if tool_calls.empty?
 
-        conversation.assistant(content, tool_calls: tool_calls, usage: usage)
-        tool_calls.each { |tool_call| handle_tool_call(conversation, tool_call) }
+        run_tools(conversation, content, tool_calls, usage, finish_reason)
       end
 
       summarize(conversation, mark)
+    end
+
+    def run_tools(conversation, content, tool_calls, usage, finish_reason)
+      # Обрыв по лимиту посреди вызова инструмента: аргументы пришли
+      # обрезанными, и parse_arguments объявит их «битым JSON от модели» —
+      # диагноз, уводящий от настоящей причины. Говорим её сразу.
+      @ui.warn(format(Messages::TRUNCATED_TOOL_CALL, limit: @config.max_tokens)) if truncated?(finish_reason)
+
+      conversation.assistant(content, tool_calls: tool_calls, usage: usage)
+      tool_calls.each { |tool_call| handle_tool_call(conversation, tool_call) }
     end
 
     # Учёт токенов стоит здесь, а не в цикле ходов: через этот метод проходят
     # оба вида запросов — и обычный ход, и суммирующий из summarize, — а тот
     # оплачен ровно так же.
     def request(conversation, tool_choice: "auto")
-      content, tool_calls, usage = @client.chat(
+      content, tool_calls, usage, finish_reason = @client.chat(
         conversation.to_a, tools: @tools.schemas, tool_choice: tool_choice
       )
       @usage.add(usage)
-      [content, tool_calls, usage]
+      [content, tool_calls, usage, finish_reason]
     rescue StandardError => e
       @failed = true
       @ui.error(format(Messages::LLM_CONNECTION_FAILED, message: e.message))
@@ -124,14 +133,38 @@ module MiniAgent
 
     # Отдельного «готово» не печатаем: финальный ответ модели уже показан
     # выше и сам по себе означает завершение.
-    def finish(conversation, content, usage = nil)
+    def finish(conversation, content, usage = nil, finish_reason = nil)
       if content.empty?
-        @ui.warn(Messages::EMPTY_RESPONSE)
+        empty_answer(finish_reason)
       else
+        # Текст есть, но модель не договорила: ответ показан, дальше решает
+        # человек. Задача при этом выполненной не считается только в первом
+        # случае — здесь есть что читать.
+        @ui.warn(format(Messages::TRUNCATED_ANSWER, limit: @config.max_tokens)) if truncated?(finish_reason)
         conversation.assistant(content, usage: usage)
       end
       conversation
     end
+
+    # Пустой content — не всегда «модели нечего сказать». У рассуждающих
+    # моделей размышления идут отдельным полем (reasoning_content), но тратят
+    # тот же бюджет max_tokens: выбрав его, они не оставляют места ответу,
+    # и до content очередь не доходит. Сервер сообщает это через
+    # finish_reason: "length" — единственный способ отличить один случай
+    # от другого. Найдено живой проверкой: при max_tokens=150 модель выдавала
+    # 638 знаков рассуждений и пустой ответ, а агент рапортовал «пустой
+    # ответ» и выходил с кодом 0.
+    def empty_answer(finish_reason)
+      unless truncated?(finish_reason)
+        @ui.warn(Messages::EMPTY_RESPONSE)
+        return
+      end
+
+      @failed = true
+      @ui.error(format(Messages::TRUNCATED_EMPTY, limit: @config.max_tokens))
+    end
+
+    def truncated?(finish_reason) = finish_reason == ChatResponse::TRUNCATED
 
     def handle_tool_call(conversation, tool_call)
       function = tool_call["function"] || {}

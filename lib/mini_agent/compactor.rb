@@ -53,12 +53,23 @@ module MiniAgent
       messages = conversation.to_a + [{ role: "user", content: Messages::COMPACT_REQUEST }]
 
       @ui.status = Messages::COMPACT_RUNNING
-      content, _tool_calls, usage = @ui.with_spinner { @client.chat(messages, tool_choice: "none") }
+      content, _tool_calls, usage, finish_reason =
+        @ui.with_spinner { @client.chat(messages, tool_choice: "none") }
       # Расход на сворачивание в счёт входит: запрос сделан и оплачен.
       # Тот же принцип, что у провалившегося хода, — счётчик показывает,
       # что произошло, а не то, что осталось в истории.
       @usage&.add(usage)
 
+      # Обрыв по лимиту здесь опаснее, чем на обычном ходу: резюме ЗАМЕЩАЕТ
+      # историю, и обрезанное на полуслове молча унесло бы часть диалога
+      # без всякой возможности её вернуть. Отказ оставляет историю целой —
+      # тот же выбор, что и при сетевом сбое.
+      #
+      # Проверяется ДО пустоты, и порядок здесь не косметика: у рассуждающих
+      # моделей выбранный бюджет оставляет content пустым, и жалоба на пустое
+      # резюме увела бы от настоящей причины ровно так же, как «пустой ответ»
+      # в Agent. Поймано живой проверкой при max_tokens=200.
+      return refuse(Messages::COMPACT_TRUNCATED) if finish_reason == ChatResponse::TRUNCATED
       return refuse(Messages::COMPACT_EMPTY) if content.nil? || content.strip.empty?
 
       content

@@ -50,6 +50,62 @@ RSpec.describe MiniAgent::Agent do
       agent.run("задача")
 
       expect(out.string).to include("пустой ответ")
+      expect(agent).not_to be_failed
+    end
+  end
+
+  # Найдено живой проверкой: qwen3.6 отдаёт размышления отдельным полем
+  # reasoning_content, но тратит на них общий с ответом бюджет max_tokens.
+  # Выбрав его, модель возвращает пустой content — и агент рапортовал
+  # «пустой ответ» с кодом возврата 0, уводя от настоящей причины.
+  describe "обрыв по лимиту генерации" do
+    it "на пустом ответе называет причину, а не «пустой ответ»" do
+      allow(client).to receive(:chat).and_return(["", [], nil, "length"])
+
+      agent.run("задача")
+
+      expect(out.string).to include("оборван на лимите", "max_tokens: 4096")
+      expect(out.string).not_to include("пустой ответ")
+    end
+
+    # Задача не выполнена — код возврата обязан это показать.
+    it "помечает задачу провалившейся" do
+      allow(client).to receive(:chat).and_return(["", [], nil, "length"])
+
+      agent.run("задача")
+
+      expect(agent).to be_failed
+    end
+
+    # Текст есть — его надо показать и сохранить, но предупредив о неполноте.
+    it "на непустом ответе предупреждает, но ответ сохраняет" do
+      allow(client).to receive(:chat).and_return(["начало отв", [], nil, "length"])
+
+      conversation = agent.run("задача")
+
+      expect(out.string).to include("● начало отв", "может быть неполным")
+      expect(conversation.last).to eq({ role: "assistant", content: "начало отв" })
+      expect(agent).not_to be_failed
+    end
+
+    # Обрезанные аргументы дошли бы до parse_arguments как «битый JSON
+    # от модели» — диагноз, уводящий от настоящей причины.
+    it "на обрыве посреди вызова инструмента называет лимит" do
+      allow(client).to receive(:chat)
+        .and_return(["думаю", [tool_call], nil, "length"], ["готово", []])
+
+      agent.run("задача")
+
+      expect(out.string).to include("Вызов инструмента оборван")
+    end
+
+    # Обычное завершение не должно попадать под предупреждение.
+    it "молчит при finish_reason stop" do
+      allow(client).to receive(:chat).and_return(["всё готово", [], nil, "stop"])
+
+      agent.run("задача")
+
+      expect(out.string).not_to include("оборван")
     end
   end
 
