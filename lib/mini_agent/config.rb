@@ -30,6 +30,17 @@ module MiniAgent
       context_window: nil,
       allow_unsafe: false,
       timeout: 120,
+      # Ожидание ответа модели. 120 секунд не хватало: на bonsai-27b (Q1_0,
+      # рассуждающая) «17*23» заняло 347 секунд, а вопрос на три абзаца —
+      # 176 при скорости ~5,7 токена/с. Агент падал с Net::ReadTimeout, хотя
+      # модель работала и почти успевала. Замерено, а не взято с запасом:
+      # на такой скорости 600 секунд — это ~3400 токенов, то есть меньше
+      # умолчания max_tokens, и на длинной задаче лимит упрётся снова.
+      #
+      # Отдельно от timeout — тот про команды bash. Одно число на две разные
+      # вещи означало бы, что правка ради медленной модели молча продлевает
+      # и ожидание зависшей команды.
+      llm_timeout: 600,
       # nil, а не Dir.pwd: умолчания замораживаются при загрузке файла, а
       # текущий каталог к моменту создания Config может быть уже другим.
       cwd: nil,
@@ -47,6 +58,7 @@ module MiniAgent
       retry_delay: "RETRY_DELAY",
       max_tokens: "MAX_TOKENS",
       context_window: "CONTEXT_WINDOW",
+      llm_timeout: "LLM_TIMEOUT",
       allow_unsafe: "ALLOW_UNSAFE",
       timeout: "COMMAND_TIMEOUT",
       cwd: "AGENT_CWD",
@@ -54,7 +66,7 @@ module MiniAgent
     }.freeze
 
     attr_reader :base_url, :api_key, :model, :max_turns,
-                :retry_count, :retry_delay, :max_tokens, :timeout, :cwd, :log
+                :retry_count, :retry_delay, :max_tokens, :timeout, :llm_timeout, :cwd, :log
 
     # Размер контекстного окна: число или nil, если он неизвестен.
     #
@@ -107,6 +119,7 @@ module MiniAgent
       @retry_delay = fetch(:retry_delay).to_f
       @max_tokens = fetch(:max_tokens).to_i
       @timeout = fetch(:timeout).to_f
+      @llm_timeout = fetch(:llm_timeout).to_f
       @context_window = positive_or_nil(fetch(:context_window))
     end
 

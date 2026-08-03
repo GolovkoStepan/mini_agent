@@ -31,6 +31,7 @@ module MiniAgent
       [:max_turns, "--max-turns N", Integer, Messages::OPT_MAX_TURNS],
       [:max_tokens, "--max-tokens N", Integer, Messages::OPT_MAX_TOKENS],
       [:context_window, "--context-window N", Integer, Messages::OPT_CONTEXT_WINDOW],
+      [:llm_timeout, "--llm-timeout N", Float, Messages::OPT_LLM_TIMEOUT],
       [:retry_count, "--retry-count N", Integer, Messages::OPT_RETRY_COUNT],
       [:retry_delay, "--retry-delay N", Float, Messages::OPT_RETRY_DELAY],
       [:base_url, "--base-url URL", Messages::OPT_BASE_URL],

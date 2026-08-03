@@ -91,6 +91,27 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  # Ожидание ответа модели и таймаут команд bash — разные вещи, и держать
+  # на них одно число значит, что правка ради медленной модели молча
+  # продлит и зависшую команду.
+  describe "ожидание ответа модели" do
+    it "по умолчанию 600 секунд" do
+      expect(described_class.new({}, env: {}).llm_timeout).to eq(600)
+    end
+
+    it "читается из опции и из ENV" do
+      expect(described_class.new({ llm_timeout: 30 }, env: {}).llm_timeout).to eq(30)
+      expect(described_class.new({}, env: { "LLM_TIMEOUT" => "45" }).llm_timeout).to eq(45)
+    end
+
+    it "не путается с таймаутом команд" do
+      config = described_class.new({ llm_timeout: 300 }, env: { "COMMAND_TIMEOUT" => "10" })
+
+      expect(config.llm_timeout).to eq(300)
+      expect(config.timeout).to eq(10)
+    end
+  end
+
   describe "контекстное окно" do
     it "по умолчанию неизвестно" do
       expect(described_class.new({}, env: {}).context_window).to be_nil

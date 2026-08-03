@@ -14,7 +14,6 @@ module MiniAgent
     ].freeze
 
     OPEN_TIMEOUT = 10
-    READ_TIMEOUT = 120
 
     def initialize(config:, ui: nil, sleeper: method(:sleep))
       @config = config
@@ -56,6 +55,7 @@ module MiniAgent
       @config.retry_count.times do |attempt|
         response = perform(body)
       rescue *RETRIABLE => e
+        timed_out if e.is_a?(Net::ReadTimeout)
         last_error = format(Messages::NETWORK_ERROR, message: e.message)
         pause
       rescue StandardError => e
@@ -79,6 +79,13 @@ module MiniAgent
     end
 
     private
+
+    # Единственная ошибка из RETRIABLE, которую повторять незачем: модель
+    # не успела, и ещё два таких же ожидания дадут то же самое — при лимите
+    # в 600 с это полчаса молчания. Про формулировку см. TIMEOUT_ERROR.
+    def timed_out
+      raise LLMError, format(Messages::TIMEOUT_ERROR, limit: @config.llm_timeout)
+    end
 
     # Запрос создаётся заново на каждой попытке: переиспользовать один объект
     # Net::HTTP::Post между повторами нельзя — после отправки он несёт в себе
@@ -174,7 +181,10 @@ module MiniAgent
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = @config.use_ssl?
       http.open_timeout = OPEN_TIMEOUT
-      http.read_timeout = READ_TIMEOUT
+      # Ожидание ответа настраивается, а открытие соединения — нет: сервер
+      # либо отзывается сразу, либо его нет, и десяти секунд на это хватает
+      # при любой скорости модели. Медленной бывает генерация, а не TCP.
+      http.read_timeout = @config.llm_timeout
       http
     end
 

@@ -141,7 +141,10 @@ RSpec.describe MiniAgent::LLMClient do
       expect(client.chat(messages).first).to eq("готово")
     end
 
-    it "повторяет запрос при таймауте чтения" do
+    # to_timeout в webmock поднимает Net::OpenTimeout, а не ReadTimeout —
+    # это таймаут ОТКРЫТИЯ соединения, и он повторяется. Про ожидание
+    # ответа — отдельный блок ниже, там поведение противоположное.
+    it "повторяет запрос при таймауте соединения" do
       stub_request(:post, endpoint)
         .to_timeout.then
         .to_return(status: 200, body: chat_response)
@@ -292,6 +295,35 @@ RSpec.describe MiniAgent::LLMClient do
 
       expect(a_request(:post, endpoint).with(body: hash_including("model" => "test-model")))
         .to have_been_made.twice
+    end
+  end
+
+  # Модель считает и не успевает — не то же самое, что сбой связи.
+  # Живой случай на квантованной 27B: обычный вопрос занял 176 секунд
+  # при потолке в 120, и агент сообщил об этом «сетевой ошибкой».
+  describe "ожидание ответа исчерпано" do
+    before { stub_request(:post, endpoint).to_raise(Net::ReadTimeout) }
+
+    # Ждать ещё дважды по столько же — значит молчать втрое дольше ради
+    # того же исхода. При лимите 600 с это полчаса вместо ответа.
+    it "не повторяет запрос" do
+      expect { client.chat(messages) }.to raise_error(MiniAgent::LLMError)
+
+      expect(a_request(:post, endpoint)).to have_been_made.once
+    end
+
+    # Сырой «Net::ReadTimeout with #<TCPSocket:(closed)>» выглядит как
+    # обрыв сети и посылает проверять сеть вместо того, чтобы поднять лимит.
+    it "называет причину и способ вместо сырой ошибки сокета" do
+      expect { client.chat(messages) }
+        .to raise_error(MiniAgent::LLMError, /не ответила за 600 с.*--llm-timeout/m)
+    end
+
+    it "показывает настроенный лимит, а не умолчание" do
+      slow = MiniAgent::Config.new({ base_url: base_url, llm_timeout: 42 }, env: {})
+
+      expect { described_class.new(config: slow).chat(messages) }
+        .to raise_error(MiniAgent::LLMError, /за 42 с/)
     end
   end
 
