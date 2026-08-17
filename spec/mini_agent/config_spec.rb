@@ -6,7 +6,7 @@ RSpec.describe MiniAgent::Config do
       config = described_class.new({}, env: {})
 
       expect(config.model).to eq("qwen/qwen3.6-35b-a3b")
-      expect(config.max_turns).to eq(10)
+      expect(config.max_turns).to eq(50)
     end
 
     it "предпочитает ENV значению по умолчанию" do
@@ -168,12 +168,59 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  # Резерв под ответ и история делят одно окно, поэтому max_tokens нельзя
+  # задать одной константой на все случаи: 4096 мало при окне 100k, а 16384
+  # больше всего окна при 8192 — в живой работе /context показывал 206%
+  # на пустой сессии и требовал звать /compact, которому нечего сворачивать.
+  describe "максимум токенов в ответе" do
+    it "берёт половину окна, когда размер известен" do
+      config = described_class.new({}, env: {})
+      config.context_window = 8192
+
+      expect(config.max_tokens).to eq(4096)
+    end
+
+    # Потолок остаётся потолком: половина от 262144 — это 131072, заведомо
+    # больше любого осмысленного ответа, и место у истории она бы съела зря.
+    it "не превышает потолок на большом окне" do
+      config = described_class.new({}, env: {})
+      config.context_window = 262_144
+
+      expect(config.max_tokens).to eq(16_384)
+    end
+
+    # Из двух указаний одного смысла верить надо более точному — тот же
+    # принцип, что у --policy против --allow-unsafe.
+    it "не трогает значение, заданное человеком" do
+      config = described_class.new({ max_tokens: 3000 }, env: {})
+      config.context_window = 8192
+
+      expect(config.max_tokens).to eq(3000)
+    end
+
+    it "учитывает и заданное через ENV" do
+      config = described_class.new({}, env: { "MAX_TOKENS" => "3000" })
+      config.context_window = 8192
+
+      expect(config.max_tokens).to eq(3000)
+    end
+
+    # Размер окна узнать не удалось — считать долю не от чего, остаётся
+    # умолчание. Выдумывать окно ради этого нельзя: ошибка в бо́льшую
+    # сторону хуже незнания.
+    it "оставляет умолчание, когда окно неизвестно" do
+      expect(described_class.new({}, env: {}).max_tokens).to eq(16_384)
+    end
+  end
+
   # Ожидание ответа модели и таймаут команд bash — разные вещи, и держать
   # на них одно число значит, что правка ради медленной модели молча
   # продлит и зависшую команду.
   describe "ожидание ответа модели" do
-    it "по умолчанию 600 секунд" do
-      expect(described_class.new({}, env: {}).llm_timeout).to eq(600)
+    # 1200, а не 600: замер на qwen3.6-35b-a3b дал 697 секунд на просьбу
+    # написать класс на 60 строк — прежнего умолчания уже не хватало.
+    it "по умолчанию 1200 секунд" do
+      expect(described_class.new({}, env: {}).llm_timeout).to eq(1200)
     end
 
     it "читается из опции и из ENV" do

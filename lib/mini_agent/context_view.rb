@@ -60,14 +60,27 @@ module MiniAgent
     # Незнание размера окна показывается прямо. Молчание выглядело бы как
     # «процентов нет, потому что считать нечего», хотя причина другая:
     # протокол этого числа не передаёт, и его надо задать самому.
+    #
+    # Окно печатается слагаемыми, а не одной суммой: «5058 из 8192» не
+    # отвечало на вопрос, занято это или свободно, и умалчивало, что резерв
+    # под ответ входит в первое число.
     def window(window)
       return gray(Messages::CMD_CONTEXT_WINDOW_UNKNOWN) unless window.known?
       return unless window.measurable?
 
-      gray(format(
-             Messages::CMD_CONTEXT_WINDOW,
-             occupied: window.occupied, size: window.size, percent: window.percent
-           ))
+      gray(format(Messages::CMD_CONTEXT_WINDOW, size: Plural.with(window.size, *Messages::TOKENS)))
+      gray(format(Messages::CMD_CONTEXT_WINDOW_HISTORY, count: window.prompt_tokens))
+      gray(format(Messages::CMD_CONTEXT_WINDOW_RESERVE, count: window.max_tokens))
+      remainder(window)
+    end
+
+    # Остаток окна после истории и резерва. Отрицательный называется своим
+    # именем: «свободно -8700» читается как ошибка счёта, хотя это ровно
+    # тот случай, ради которого отчёт и заводился.
+    def remainder(window)
+      left = window.remaining
+      template = left.negative? ? Messages::CMD_CONTEXT_WINDOW_OVER : Messages::CMD_CONTEXT_WINDOW_FREE
+      gray(format(template, count: left.abs, percent: window.percent))
     end
 
     # Три беды с тремя разными лечениями: описание проекта правится файлом,

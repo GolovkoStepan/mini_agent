@@ -64,7 +64,7 @@ RSpec.describe MiniAgent::Agent do
 
       agent.run("задача")
 
-      expect(out.string).to include("оборван на лимите", "max_tokens: 4096")
+      expect(out.string).to include("оборван на лимите", "max_tokens: 16384")
       expect(out.string).not_to include("пустой ответ")
     end
 

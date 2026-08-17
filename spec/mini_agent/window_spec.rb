@@ -52,6 +52,27 @@ RSpec.describe MiniAgent::Window do
     it "показывает больше ста процентов, когда max_tokens не влезает" do
       expect(window(size: 8192, prompt: 7000, max_tokens: 4096).percent).to eq(135)
     end
+
+    # Слагаемые для отчёта: окно показывается разложенным, а не одной
+    # суммой — «5058 из 8192» не отвечало, занято это или свободно.
+    it "отдаёт промпт слагаемым" do
+      expect(window(size: 8192, prompt: 2000, max_tokens: 1000).prompt_tokens).to eq(2000)
+      expect(window(size: 8192, max_tokens: 1000).prompt_tokens).to eq(0)
+    end
+
+    # Отдельно от free: тот про «сколько дадут сгенерировать», этот про
+    # «сходится ли бюджет вообще».
+    it "считает остаток после истории и резерва" do
+      expect(window(size: 8192, prompt: 2000, max_tokens: 1000).remaining).to eq(5192)
+    end
+
+    it "уходит в минус, когда резерв в окно не помещается" do
+      expect(window(size: 8192, prompt: 5000, max_tokens: 8000).remaining).to eq(-4808)
+    end
+
+    it "молчит об остатке, пока мерить нечем" do
+      expect(window(size: nil, prompt: 500, max_tokens: 100).remaining).to eq(0)
+    end
   end
 
   describe "предупреждения" do

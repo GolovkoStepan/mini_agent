@@ -29,4 +29,32 @@ RSpec.describe MiniAgent::History do
 
     expect(history.build.size).to eq(1)
   end
+
+  # Найдено живой проверкой: после «История очищена» /context показывал
+  # прежние 16909 из 8192 (206%) при пустой истории и советовал звать
+  # /compact. Число формально честное — промпт последнего запроса, — но
+  # к новой истории оно не относится, и как «контекст сейчас» это ложь.
+  describe "счётчик токенов" do
+    it "забывает размер контекста при новой истории" do
+      history = described_class.new
+      history.usage.add({ "prompt_tokens" => 6000, "completion_tokens" => 100 })
+
+      history.build
+
+      expect(history.usage.context).to eq(0)
+    end
+
+    # Откатывать потраченное нельзя: серверу за те запросы уплачено. Тот же
+    # принцип, что у провалившегося хода, — счёт показывает, что произошло.
+    it "не забывает потраченное" do
+      history = described_class.new
+      history.usage.add({ "prompt_tokens" => 6000, "completion_tokens" => 100 })
+
+      history.build
+
+      expect(history.usage.sent).to eq(6000)
+      expect(history.usage.generated).to eq(100)
+      expect(history.usage).not_to be_empty
+    end
+  end
 end

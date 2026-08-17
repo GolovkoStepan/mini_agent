@@ -177,6 +177,19 @@ RSpec.describe MiniAgent::ContextReport do
     it "молчит, когда счётчик не передан" do
       expect(described_class.new(talk).tokens).to be_nil
     end
+
+    # После /clear счётчик забывает прошлый промпт, а нового ещё не было:
+    # запросы в сессии уже шли, но к этой истории они не относятся.
+    # «Последний промпт — 0 токенов» читалось бы как ответ сервера, хотя
+    # это его отсутствие. Замечено живой проверкой сразу после починки
+    # самого сброса — тот дефект чинился, а этот им же и создавался.
+    it "молчит, когда история начата заново" do
+      usage = MiniAgent::Usage.new
+      usage.add({ "prompt_tokens" => 508, "completion_tokens" => 5 })
+      usage.reset_context
+
+      expect(described_class.new(talk, usage: usage).tokens).to be_nil
+    end
   end
 
   describe "контекстное окно" do

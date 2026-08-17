@@ -37,6 +37,32 @@ RSpec.describe MiniAgent::UI do
 
       expect(out.string).to include('{"query":"ruby"}')
     end
+
+    # Запись файла через heredoc — это вся начинка файла одной командой.
+    # Без ограничения 30 строк содержимого давали 33 строки заголовка;
+    # у результата команды лимит был, у самой команды — нет.
+    it "усекает многострочную команду" do
+      ui.tool_call("bash", { "command" => "cat > f <<EOF\n#{(1..30).map { |i| "строка #{i}" }.join("\n")}\nEOF" })
+
+      expect(out.string).to include("cat > f <<EOF", "строка 1", "… ещё 29 строк команды")
+      expect(out.string).not_to include("строка 30")
+    end
+
+    it "усекает длинную команду в одну строку" do
+      ui.tool_call("bash", { "command" => "echo #{"слово " * 100}" })
+
+      expect(out.string).to include("…")
+      expect(out.string.lines.first(3).join.length).to be < 300
+    end
+
+    # Ровно на границе усечения быть не должно: обрезанная команда без
+    # нужды выглядит как обрезанная по ошибке.
+    it "не трогает короткую многострочную команду" do
+      ui.tool_call("bash", { "command" => "a\nb\nc" })
+
+      expect(out.string).to include("● Bash(a\nb\nc)")
+      expect(out.string).not_to include("…")
+    end
   end
 
   describe "#tool_result" do
@@ -166,10 +192,25 @@ RSpec.describe MiniAgent::UI do
     end
 
     describe "контекстное окно" do
-      it "печатает заполнение окна" do
+      # Слагаемыми, а не одной суммой: «3000 из 8192» не отвечало на вопрос,
+      # занято это или свободно, и умалчивало, что резерв под ответ входит
+      # в первое число. Замечание из живой работы.
+      it "печатает заполнение окна слагаемыми" do
         ui.context(report(usage: tokens(2000), config: settings(window: 8192)))
 
-        expect(out.string).to include("окно модели: 3000 из 8192 (37%)")
+        expect(out.string).to include("окно модели: 8192 токена")
+        expect(out.string).to include("история        2000")
+        expect(out.string).to include("резерв ответ   1000")
+        expect(out.string).to include("свободно       5192  (37% занято)")
+      end
+
+      # Резерв не влезает в окно: «свободно -8700» читалось бы как ошибка
+      # счёта, хотя это ровно тот случай, ради которого отчёт заводился.
+      it "называет нехватку места нехваткой, а не отрицательным остатком" do
+        ui.context(report(usage: tokens(5000), config: settings(window: 8192, max_tokens: 8000)))
+
+        expect(out.string).to include("не хватает     4808")
+        expect(out.string).not_to include("свободно")
       end
 
       # Незнание показывается прямо: молчание выглядело бы как «считать
@@ -237,7 +278,7 @@ RSpec.describe MiniAgent::UI do
       it "на просторном окне не предупреждает ни о чём" do
         ui.context(report(usage: tokens(1000), config: settings(window: 65_536, max_tokens: 4096)))
 
-        expect(out.string).to include("окно модели: 5096 из 65536")
+        expect(out.string).to include("окно модели: 65536 токенов", "свободно      60440")
         expect(out.string).not_to include("Окно заполнено", "На ответ остаётся")
       end
     end

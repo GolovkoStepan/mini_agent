@@ -17,12 +17,13 @@ module MiniAgent
       @ui = ui
       @history = history
       @prompt = prompt
-      @usage = Usage.new
     end
 
-    # Расход токенов за сессию: живёт у агента, а не у клиента, потому что
-    # соединение может подниматься заново, а счёт идёт по всей работе.
-    attr_reader :usage
+    # Расход токенов за сессию. Хранится в History, а не здесь: там же
+    # заводится всякая новая история, а начало новой истории обнуляет
+    # «контекст сейчас». Разведи их — и сброс уходил бы в один объект,
+    # а /context показывал бы другой.
+    def usage = @history.usage
 
     # Пустая история со всем, что агенту для неё нужно. Repl зовёт этот же
     # метод по /clear: команда начинает диалог заново, и без общей точки
@@ -37,7 +38,7 @@ module MiniAgent
     # и счётчику токенов: собирать их в Repl заново значило бы продублировать
     # половину AgentBuilder. Сама работа — в Compactor; здесь один вызов.
     def compact(conversation)
-      Compactor.new(client: @client, history: @history, ui: @ui, usage: @usage).call(conversation)
+      Compactor.new(client: @client, history: @history, ui: @ui, usage: usage).call(conversation)
     end
 
     # Описать проект в AGENTS.md (/init). Возвращает историю: команда ведёт
@@ -117,7 +118,7 @@ module MiniAgent
       content, tool_calls, usage, finish_reason = @client.chat(
         conversation.to_a, tools: @tools.schemas, tool_choice: tool_choice
       )
-      @usage.add(usage)
+      @history.usage.add(usage)
       [content, tool_calls, usage, finish_reason]
     rescue StandardError => e
       @failed = true

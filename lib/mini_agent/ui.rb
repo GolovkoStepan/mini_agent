@@ -20,6 +20,18 @@ module MiniAgent
     PREVIEW_LINES = 5
     PREVIEW_CHARS = 500
 
+    # Сколько строк команды показывать в заголовке вызова.
+    #
+    # Отдельно от PREVIEW_LINES: тот про вывод команды, этот про саму
+    # команду. Ограничения у результата не было вовсе, и запись файла через
+    # heredoc печатала весь файл в скобках — 30 строк содержимого давали
+    # 33 строки заголовка. Асимметрия была непреднамеренной.
+    #
+    # Три строки, а не пять: у команды информативно начало (что запускаем),
+    # а у вывода — весь показанный кусок.
+    COMMAND_LINES = 3
+    COMMAND_CHARS = 200
+
     BULLET = "●"
     BRANCH = "⎿"
     INDENT = "    "
@@ -108,6 +120,10 @@ module MiniAgent
     # Заголовок вида «● Bash(ls -la lib)»: имя инструмента с заглавной,
     # аргумент в скобках. Для bash в скобках сама команда, для прочих —
     # компактный JSON.
+    #
+    # Аргумент усекается: запись файла через heredoc — это вся будущая
+    # начинка файла одной командой, и без ограничения она печаталась целиком.
+    # В модель уходит полный текст в любом случае, здесь только экран.
     def tool_call(name, arguments)
       argument = if name == Tools::Bash::NAME && arguments["command"]
                    arguments["command"]
@@ -115,7 +131,7 @@ module MiniAgent
                    arguments.to_json
                  end
 
-      puts("\n#{paint(BULLET, :blue)} #{paint(name.capitalize, :bold)}(#{argument})")
+      puts("\n#{paint(BULLET, :blue)} #{paint(name.capitalize, :bold)}(#{shorten(argument)})")
     end
 
     # Пользователю показываем усечённо — полный текст всё равно уходит модели.
@@ -164,6 +180,20 @@ module MiniAgent
     def stop_spinner = @spinner.stop
 
     private
+
+    # Команда для заголовка: не длиннее COMMAND_LINES строк и COMMAND_CHARS
+    # знаков. Отброшенное называется числом строк, а не многоточием: по нему
+    # видно, много ли скрыто, — так же, как в выводе команды.
+    def shorten(text)
+      lines = text.to_s.lines
+      return text if lines.size <= COMMAND_LINES && text.to_s.length <= COMMAND_CHARS
+
+      shown = lines.take(COMMAND_LINES).join.rstrip[0, COMMAND_CHARS]
+      hidden = lines.size - shown.lines.size
+      return "#{shown}…" unless hidden.positive?
+
+      "#{shown}\n#{INDENT}#{format(Messages::COMMAND_ELLIPSIS, count: Plural.with(hidden, *Messages::LINES))}"
+    end
 
     # Первая строка результата — «Код выхода: N» от Tools::Bash. Человеку
     # она нужна только когда команда упала, поэтому отрезаем её от тела и

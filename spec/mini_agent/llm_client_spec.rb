@@ -94,7 +94,7 @@ RSpec.describe MiniAgent::LLMClient do
 
       expect(a_request(:post, endpoint).with(
                headers: { "Authorization" => "Bearer secret", "Content-Type" => "application/json" },
-               body: hash_including("model" => "test-model", "max_tokens" => 4096)
+               body: hash_including("model" => "test-model", "max_tokens" => 16_384)
              )).to have_been_made
     end
 
@@ -320,7 +320,7 @@ RSpec.describe MiniAgent::LLMClient do
     # обрыв сети и посылает проверять сеть вместо того, чтобы поднять лимит.
     it "называет причину и способ вместо сырой ошибки сокета" do
       expect { client.chat(messages) }
-        .to raise_error(MiniAgent::LLMError, /не ответила за 600 с.*--llm-timeout/m)
+        .to raise_error(MiniAgent::LLMError, /не ответила за 1200 с.*--llm-timeout/m)
     end
 
     it "показывает настроенный лимит, а не умолчание" do

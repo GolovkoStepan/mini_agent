@@ -44,6 +44,7 @@ module MiniAgent
   class Config
     DEFAULTS: Hash[Symbol, untyped]
     ENV_KEYS: Hash[Symbol, String]
+    WINDOW_SHARE: Float
 
     attr_reader base_url: String
     attr_reader api_key: String
@@ -51,13 +52,13 @@ module MiniAgent
     attr_reader max_turns: Integer
     attr_reader retry_count: Integer
     attr_reader retry_delay: Float
-    attr_reader max_tokens: Integer
     attr_reader timeout: Float
     attr_reader llm_timeout: Float
     attr_reader policy: Symbol
     attr_accessor context_window: Integer?
 
     def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
+    def max_tokens: () -> Integer
     def allow_unsafe?: () -> bool
     def stream?: () -> bool
     def chat_uri: () -> URI::Generic
@@ -85,6 +86,7 @@ module MiniAgent
 
     def initialize: () -> void
     def add: (json_object? usage) -> self
+    def reset_context: () -> self
     def empty?: () -> bool
     def to_h: () -> Hash[Symbol, Integer]
   end
@@ -102,6 +104,7 @@ module MiniAgent
   class History
     attr_accessor project_context: String?
     attr_reader transcript: Transcript?
+    attr_reader usage: Usage
 
     def initialize: (?project_context: String?, ?transcript: Transcript?) -> void
     def build: () -> Conversation
@@ -137,9 +140,11 @@ module MiniAgent
     def initialize: (size: Integer?, ?prompt_tokens: Integer?, ?max_tokens: Integer) -> void
     def known?: () -> bool
     def measurable?: () -> bool
+    def prompt_tokens: () -> Integer
     def occupied: () -> Integer
     def percent: () -> Integer
     def free: () -> Integer?
+    def remaining: () -> Integer
     def tight?: () -> bool
     def starved?: () -> bool
   end
@@ -247,6 +252,8 @@ module MiniAgent
   class UI
     PREVIEW_LINES: Integer
     PREVIEW_CHARS: Integer
+    COMMAND_LINES: Integer
+    COMMAND_CHARS: Integer
     BULLET: String
     BRANCH: String
     INDENT: String
