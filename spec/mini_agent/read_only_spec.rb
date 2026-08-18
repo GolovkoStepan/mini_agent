@@ -81,6 +81,26 @@ RSpec.describe MiniAgent::ReadOnly do
       expect(described_class.command?("git config user.name x")).to be(false)
     end
 
+    # Живая проверка режима планирования: модель звала `git -C /tmp/x ls-files`
+    # — команду, которую ей же советует инструкция режима, — и получала отказ,
+    # потому что подкоманда стояла не вторым словом.
+    it "пропускает читающую подкоманду за глобальными ключами git" do
+      expect(described_class.command?("git -C /tmp/x ls-files")).to be(true)
+      expect(described_class.command?("git --no-pager log --oneline")).to be(true)
+    end
+
+    it "смотрит на подкоманду и за ключами тоже" do
+      expect(described_class.command?("git -C /tmp/x commit -m x")).to be(false)
+    end
+
+    # -c задаёт конфигурацию, а через alias — чужую команду целиком.
+    # Пропускать его вместе с прочими ключами значило бы открыть дыру
+    # ради удобства.
+    it "не пропускает git -c" do
+      expect(described_class.command?("git -c alias.x=status x")).to be(false)
+      expect(described_class.command?("git -c core.pager=cat log")).to be(false)
+    end
+
     it "не считает читающей команду, начинающуюся именем из списка как частью слова" do
       expect(described_class.command?("catalog-tool run")).to be(false)
     end

@@ -56,11 +56,20 @@ module MiniAgent
       # промпт обязан называть место, где команды выполняются на самом деле,
       # иначе он врёт убедительнее, чем молчит.
       history = History.new(project_context: project_context, transcript: log, cwd: @config.cwd || Dir.pwd)
-      Agent.new(config: @config, client: client, tools: tools, ui: @ui, history: history, prompt: prompt)
+      Agent.new(config: @config, client: client, tools: tools, ui: @ui, history: history, prompt: prompt,
+                plan_mode: plan_mode)
     end
 
     def prompt
       @prompt ||= Prompt.new(input: @input, output: @output)
+    end
+
+    # Один объект на агента, охрану команд и Repl. Держать по своему у каждого
+    # значило бы включённый режим, о котором не знает охрана: /plan переключал
+    # бы одно состояние, а команды проверялись бы по другому — и планирование
+    # молча выполняло бы всё подряд.
+    def plan_mode
+      @plan_mode ||= PlanMode.new(enabled: @config.plan?)
     end
 
     # О включённом журнале сообщаем строкой в выводе — по той же причине, что
@@ -90,7 +99,7 @@ module MiniAgent
     end
 
     def build_tools
-      guard = CommandGuard.new(policy: @config.policy, prompt: prompt, ui: @ui)
+      guard = CommandGuard.new(policy: @config.policy, prompt: prompt, ui: @ui, plan_mode: plan_mode)
       runner = ProcessRunner.new(timeout: @config.timeout, cwd: @config.cwd)
       ToolRegistry.new([Tools::Bash.new(guard: guard, runner: runner)])
     end

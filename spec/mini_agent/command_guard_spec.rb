@@ -42,12 +42,12 @@ RSpec.describe MiniAgent::CommandGuard do
     end
   end
 
-  describe "#authorize? при политике deny (умолчание)" do
+  describe "#verdict при политике deny (умолчание)" do
     it "пропускает безопасную команду без вопросов" do
       prompt = instance_spy(MiniAgent::Prompt)
       guard = described_class.new(prompt: prompt)
 
-      expect(guard.authorize?("ls -la")).to be(true)
+      expect(guard.verdict("ls -la")).to be(:allow)
       expect(prompt).not_to have_received(:confirm?)
     end
 
@@ -56,33 +56,33 @@ RSpec.describe MiniAgent::CommandGuard do
       prompt = instance_spy(MiniAgent::Prompt)
       guard = described_class.new(prompt: prompt)
 
-      expect(guard.authorize?("bundle exec rspec")).to be(true)
+      expect(guard.verdict("bundle exec rspec")).to be(:allow)
       expect(prompt).not_to have_received(:confirm?)
     end
 
     it "разрешает опасную команду при подтверждении" do
       guard = described_class.new(prompt: MiniAgent::Prompt::AutoApprove.new)
 
-      expect(guard.authorize?("rm -rf /tmp/x")).to be(true)
+      expect(guard.verdict("rm -rf /tmp/x")).to be(:allow)
     end
 
     it "запрещает опасную команду при отказе" do
       guard = described_class.new(prompt: MiniAgent::Prompt::AutoDeny.new)
 
-      expect(guard.authorize?("rm -rf /tmp/x")).to be(false)
+      expect(guard.verdict("rm -rf /tmp/x")).to be(:cancelled)
     end
 
     it "предупреждает через ui об опасной команде" do
       ui = spy("UI")
       guard = described_class.new(prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
 
-      guard.authorize?("sudo rm -rf /")
+      guard.verdict("sudo rm -rf /")
 
       expect(ui).to have_received(:warn).with(/Опасная команда/)
     end
   end
 
-  describe "#authorize? при политике ask" do
+  describe "#verdict при политике ask" do
     def guard(prompt, ui: nil)
       described_class.new(policy: :ask, prompt: prompt, ui: ui)
     end
@@ -90,7 +90,7 @@ RSpec.describe MiniAgent::CommandGuard do
     it "пропускает читающую команду без вопросов" do
       prompt = instance_spy(MiniAgent::Prompt)
 
-      expect(guard(prompt).authorize?("cat README.md")).to be(true)
+      expect(guard(prompt).verdict("cat README.md")).to be(:allow)
       expect(prompt).not_to have_received(:confirm?)
     end
 
@@ -98,12 +98,12 @@ RSpec.describe MiniAgent::CommandGuard do
       prompt = instance_spy(MiniAgent::Prompt)
       allow(prompt).to receive(:confirm?).and_return(true)
 
-      expect(guard(prompt).authorize?("bundle exec rspec")).to be(true)
+      expect(guard(prompt).verdict("bundle exec rspec")).to be(:allow)
       expect(prompt).to have_received(:confirm?)
     end
 
     it "запрещает пишущую команду при отказе" do
-      expect(guard(MiniAgent::Prompt::AutoDeny.new).authorize?("touch new.rb")).to be(false)
+      expect(guard(MiniAgent::Prompt::AutoDeny.new).verdict("touch new.rb")).to be(:cancelled)
     end
 
     # Пишущая — не то же самое, что опасная, и слово «опасная» здесь было бы
@@ -111,7 +111,7 @@ RSpec.describe MiniAgent::CommandGuard do
     it "не называет обычную пишущую команду опасной" do
       ui = spy("UI")
 
-      guard(MiniAgent::Prompt::AutoDeny.new, ui: ui).authorize?("mkdir tmp")
+      guard(MiniAgent::Prompt::AutoDeny.new, ui: ui).verdict("mkdir tmp")
 
       expect(ui).to have_received(:warn).with(/не только читает/)
       expect(ui).not_to have_received(:warn).with(/Опасная/)
@@ -122,18 +122,51 @@ RSpec.describe MiniAgent::CommandGuard do
     it "называет опасную команду опасной, а не просто пишущей" do
       ui = spy("UI")
 
-      guard(MiniAgent::Prompt::AutoDeny.new, ui: ui).authorize?("sudo ls")
+      guard(MiniAgent::Prompt::AutoDeny.new, ui: ui).verdict("sudo ls")
 
       expect(ui).to have_received(:warn).with(/Опасная команда/)
     end
   end
 
-  describe "#authorize? при политике unsafe" do
+  describe "#verdict в режиме планирования" do
+    def guard(policy: :deny, prompt: MiniAgent::Prompt::AutoApprove.new, ui: nil)
+      described_class.new(policy: policy, prompt: prompt, ui: ui, plan_mode: MiniAgent::PlanMode.new(enabled: true))
+    end
+
+    it "пропускает читающую команду" do
+      expect(guard.verdict("cat README.md")).to be(:allow)
+    end
+
+    it "отвергает пишущую, не спрашивая" do
+      prompt = instance_spy(MiniAgent::Prompt)
+
+      expect(guard(prompt: prompt).verdict("touch new.rb")).to be(:planning)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    # Режим спрашивается раньше денилиста: иначе на rm -rf вылезло бы
+    # «выполнять?» — предложение сделать ровно то, ради невыполнения чего
+    # режим и включён.
+    it "отвергает опасную команду молча, а не спрашивает про неё" do
+      prompt = instance_spy(MiniAgent::Prompt)
+
+      expect(guard(prompt: prompt).verdict("rm -rf /tmp/x")).to be(:planning)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    # Планирование сильнее политики: unsafe означает «не спрашивать»,
+    # а не «выполнять, когда договорились не выполнять».
+    it "перебивает политику unsafe" do
+      expect(guard(policy: :unsafe).verdict("rm -rf /tmp/x")).to be(:planning)
+    end
+  end
+
+  describe "#verdict при политике unsafe" do
     it "не спрашивает подтверждения об опасной команде" do
       prompt = instance_spy(MiniAgent::Prompt)
       guard = described_class.new(policy: :unsafe, prompt: prompt)
 
-      expect(guard.authorize?("rm -rf /tmp/x")).to be(true)
+      expect(guard.verdict("rm -rf /tmp/x")).to be(:allow)
       expect(prompt).not_to have_received(:confirm?)
     end
 
@@ -141,7 +174,7 @@ RSpec.describe MiniAgent::CommandGuard do
       ui = spy("UI")
       guard = described_class.new(policy: :unsafe, prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
 
-      expect(guard.authorize?("sudo ls")).to be(true)
+      expect(guard.verdict("sudo ls")).to be(:allow)
       expect(ui).to have_received(:warn).with(/policy unsafe/)
     end
 
@@ -151,7 +184,7 @@ RSpec.describe MiniAgent::CommandGuard do
       ui = spy("UI")
       guard = described_class.new(policy: :unsafe, prompt: MiniAgent::Prompt::AutoDeny.new, ui: ui)
 
-      guard.authorize?("mkdir tmp")
+      guard.verdict("mkdir tmp")
 
       expect(ui).not_to have_received(:warn)
     end

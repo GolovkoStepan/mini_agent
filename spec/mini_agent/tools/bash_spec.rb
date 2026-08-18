@@ -53,6 +53,26 @@ RSpec.describe MiniAgent::Tools::Bash do
     end
   end
 
+  # Два отказа объясняются модели по-разному, и это не украшение: «пробуй
+  # иначе» после отказа режима гонит её подбирать обход, которого нет.
+  context "когда идёт планирование" do
+    let(:guard) do
+      MiniAgent::CommandGuard.new(prompt: MiniAgent::Prompt::AutoApprove.new,
+                                  plan_mode: MiniAgent::PlanMode.new(enabled: true))
+    end
+
+    it "возвращает отказ режима, а не отмену пользователем" do
+      result = tool.call({ "command" => "touch new.rb" })
+
+      expect(result).to eq(MiniAgent::Messages::PLAN_REFUSED)
+      expect(result).to include("Идёт планирование")
+    end
+
+    it "выполняет читающую команду как обычно" do
+      expect(tool.call({ "command" => "echo привет" })).to include("привет")
+    end
+  end
+
   # Таймаут — это результат, который модель должна увидеть,
   # а не исключение, роняющее цикл агента.
   it "превращает таймаут в текстовый результат" do

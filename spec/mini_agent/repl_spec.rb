@@ -210,6 +210,62 @@ RSpec.describe MiniAgent::Repl do
       end
     end
 
+    describe "/plan" do
+      # Тот же объект, что у охраны команд: свой у Repl означал бы включённый
+      # режим, о котором CommandGuard не знает, — то есть план, по ходу
+      # которого агент правит файлы.
+      def planning_repl(input, prompt: MiniAgent::Prompt::AutoDeny.new)
+        agent = MiniAgent::Agent.new(config: config, client: client, tools: tools, ui: ui, prompt: prompt)
+        reader = MiniAgent::LineReader.new(input: StringIO.new(input), output: out)
+        [agent, described_class.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader)]
+      end
+
+      it "переключает режим туда и обратно" do
+        agent, repl = planning_repl("/plan\n/plan\nexit\n")
+        repl.run
+
+        expect(agent.plan_mode.on?).to be(false)
+        expect(out.string).to include("Режим планирования включён", "Режим планирования выключен")
+      end
+
+      # Главное про эту ветку: включённый режим меняет обработку обычной
+      # задачи. Без ветвления в run_task задача шла бы прямо в Agent#run,
+      # то есть выполнялась бы вместо планирования — и заметить это можно
+      # было бы только по изменённым файлам.
+      it "проводит задачу через планирование и спрашивает, выполнять ли" do
+        allow(client).to receive(:chat).and_return(["1. Прочитать. 2. Написать.", []])
+        prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+        agent, repl = planning_repl("/plan\nкак добавить X?\nexit\n", prompt: prompt)
+        repl.run
+
+        expect(prompt).to have_received(:confirm?).with(/Выполнять этот план/)
+        expect(agent.plan_mode.plan).to eq("1. Прочитать. 2. Написать.")
+      end
+
+      # Инструкция режима идёт отдельным сообщением перед задачей: системный
+      # промпт собран на старте, а /plan набирают посреди сессии.
+      it "предупреждает модель о запрете правок" do
+        allow(client).to receive(:chat).and_return(["план", []])
+        _, repl = planning_repl("/plan\nкак добавить X?\nexit\n")
+        conversation = repl.run
+
+        expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system user user assistant])
+        expect(conversation.to_a[1][:content]).to include("Planning mode is on")
+      end
+
+      # /init пишет файл — то самое, чего режим не делает. Отказ стоит до
+      # запуска, а не приходит отказом инструмента: иначе агент потратил бы
+      # полдюжины ходов на изучение проекта и не смог бы записать результат.
+      it "не даёт запустить /init во время планирования" do
+        allow(client).to receive(:chat).and_return(["ответ", []])
+        _, repl = planning_repl("/plan\n/init\nexit\n")
+        repl.run
+
+        expect(client).not_to have_received(:chat)
+        expect(out.string).to include("/init пишет файл")
+      end
+    end
+
     describe "/compact" do
       # Главное про эту ветку: свёрнутая история должна уехать в следующую
       # итерацию цикла. Вернуть здесь прежнюю conversation — значит молча

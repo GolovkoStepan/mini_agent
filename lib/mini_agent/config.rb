@@ -48,6 +48,11 @@ module MiniAgent
       # только в интерактивном режиме и только человеку, который в этот
       # момент смотрит на экран.
       auto_compact: true,
+      # Начинать сессию в режиме планирования. Выключено: планирование —
+      # состояние, в которое входят под конкретную задачу, а не свойство
+      # запуска. Разовому запуску (--plan) это как раз нужно: он печатает
+      # план и выходит, не выполнив его.
+      plan: false,
       timeout: 120,
       # Ожидание ответа модели. 120 секунд не хватало: на bonsai-27b (Q1_0,
       # рассуждающая) «17*23» заняло 347 секунд, а вопрос на три абзаца —
@@ -106,6 +111,7 @@ module MiniAgent
       llm_timeout: "LLM_TIMEOUT",
       policy: "AGENT_POLICY",
       allow_unsafe: "ALLOW_UNSAFE",
+      plan: "AGENT_PLAN",
       stream: "LLM_STREAM",
       auto_compact: "AUTO_COMPACT",
       timeout: "COMMAND_TIMEOUT",
@@ -132,8 +138,8 @@ module MiniAgent
       read_limits
       @policy = read_policy
       @stream = to_bool(fetch(:stream))
-      @cwd = expand_cwd(fetch(:cwd))
-      @log = expand_log(fetch(:log))
+      @cwd = Paths.directory(fetch(:cwd))
+      @log = Paths.file(fetch(:log))
     end
 
     # Максимум токенов в ответе модели.
@@ -181,6 +187,13 @@ module MiniAgent
     def stream?
       @stream
     end
+
+    # Начинать в режиме планирования: только чтение, в конце — план.
+    #
+    # Вычисляется на месте по той же причине, что и auto_compact?: спрашивают
+    # его один раз при сборке, а конструктор Config и без того длиннее,
+    # чем хотелось бы.
+    def plan? = to_bool(fetch(:plan))
 
     # Сворачивать диалог самостоятельно при нехватке окна.
     #
@@ -272,36 +285,6 @@ module MiniAgent
       return env_value unless env_value.nil? || env_value.empty?
 
       DEFAULTS.fetch(key)
-    end
-
-    # Каталог проверяется здесь, а не при первом запуске команды: иначе опечатка
-    # в пути всплывёт посреди работы невнятной ошибкой от Open3, уже после
-    # запроса к модели. Развёрнутый путь — чтобы `--cwd .` и `~/проект`
-    # попадали в вывод в понятном человеку виде.
-    def expand_cwd(value)
-      return nil if value.nil? || value.to_s.empty?
-
-      path = File.expand_path(value.to_s)
-      raise ConfigError, format(Messages::CWD_NOT_FOUND, path: path) unless File.directory?(path)
-
-      path
-    end
-
-    # Путь журнала разворачивается относительно каталога запуска, а не --cwd:
-    # `--log session.jsonl` человек пишет там, где стоит сам, и искать файл
-    # он пойдёт туда же, даже если команды агента выполняются в другом месте.
-    #
-    # Каталог проверяется здесь по той же причине, что и для --cwd: иначе
-    # опечатка в пути всплывёт после первого же запроса к модели, когда
-    # писать станет некуда, а платить за запрос уже пришлось.
-    def expand_log(value)
-      return nil if value.nil? || value.to_s.empty?
-
-      path = File.expand_path(value.to_s)
-      dir = File.dirname(path)
-      raise ConfigError, format(Messages::LOG_DIR_NOT_FOUND, path: dir) unless File.directory?(dir)
-
-      path
     end
 
     def to_bool(value)

@@ -37,6 +37,19 @@ module MiniAgent
     # все они читают в одной форме и пишут в другой, а форму мы не разбираем.
     GIT_SUBCOMMANDS = %w[status log diff show ls-files blame rev-parse describe shortlog].freeze
 
+    # Глобальные ключи git, стоящие ДО подкоманды, и число их аргументов.
+    # Нужны потому, что подкоманда при них оказывается не вторым словом:
+    # живая проверка режима планирования дала отказ на `git -C /tmp/x
+    # ls-files` — команде, которую агенту же и советует инструкция режима.
+    # Каталог у bash-вызова свой (chdir), и модель приходит к -C сама.
+    #
+    # Пропускаются ровно эти два: -C меняет каталог, --no-pager — вывод,
+    # и ни один не влияет на то, пишет подкоманда или читает. `-c` сюда
+    # не входит намеренно: им подсовывают алиас (`git -c alias.x='!rm -rf /'
+    # x`), то есть чужую команду, — тот же довод, по которому в списке нет
+    # tee и xargs.
+    GIT_GLOBAL = { "-C" => 1, "--no-pager" => 0 }.freeze
+
     # Конструкции, при которых разбор по словам перестаёт что-либо значить:
     # подстановка команды (`` ` ``, `$(`), подстановка процесса и любое
     # перенаправление. Ни одна из них не встречается в честном чтении,
@@ -73,10 +86,23 @@ module MiniAgent
 
       words = part.split
       return false if words.empty?
-      return true if words.first == "git" && GIT_SUBCOMMANDS.include?(words[1])
+      return true if words.first == "git" && GIT_SUBCOMMANDS.include?(git_subcommand(words))
 
       COMMANDS.include?(words.first)
     end
     private_class_method :reader?
+
+    # Подкоманда git: второе слово или первое за глобальными ключами.
+    # Неизвестный ключ обрывает пропуск, а не пропускается заодно с прочими:
+    # что стоит за ним, мы не знаем, и «наверное, подкоманда» здесь означало
+    # бы разбор флагов вслепую — ровно то, чего этот модуль не делает.
+    def self.git_subcommand(words)
+      index = 1
+      while (arguments = GIT_GLOBAL[words[index]])
+        index += arguments + 1
+      end
+      words[index]
+    end
+    private_class_method :git_subcommand
   end
 end

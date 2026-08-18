@@ -163,6 +163,23 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  # Планирование — состояние сессии, а не четвёртая политика: его включают
+  # и выключают по ходу работы, тогда как политика задаётся на запуск. Флаг
+  # задаёт только начальное положение.
+  describe "#plan?" do
+    it "выключено по умолчанию" do
+      expect(described_class.new({}, env: {}).plan?).to be(false)
+    end
+
+    it "включается флагом" do
+      expect(described_class.new({ plan: true }, env: {}).plan?).to be(true)
+    end
+
+    it "включается из окружения" do
+      expect(described_class.new({}, env: { "AGENT_PLAN" => "true" }).plan?).to be(true)
+    end
+  end
+
   describe "#chat_uri" do
     it "собирает адрес эндпоинта из base_url" do
       config = described_class.new({ base_url: "http://localhost:1234/v1" }, env: {})

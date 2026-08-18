@@ -16,6 +16,11 @@ module MiniAgent
   #   :ask    — спрашивать. Молча идёт только заведомо читающее.
   #   :unsafe — выполнять всё, про денилист лишь предупреждать.
   #
+  # Поверх политики стоит режим планирования (PlanMode): пока он включён,
+  # выполняется только заведомо читающее, а всё остальное отвергается без
+  # вопросов. Спросить там было бы неверно: план на то и план, что его
+  # сначала показывают целиком, а потом одобряют — а не по команде за раз.
+  #
   # Умолчанием оставлен :deny, а не :ask: агента зовут работать, и на первой
   # же задаче вида «запусти тесты» строгая политика превращает работу в череду
   # подтверждений. Кто хочет её — включает флагом осознанно.
@@ -36,41 +41,52 @@ module MiniAgent
       /:\(\)\s*\{\s*:\|\s*:&\s*\}\s*;\s*:/ # форк-бомба
     ].freeze
 
-    def initialize(policy: :deny, prompt: Prompt.new, ui: nil)
+    def initialize(policy: :deny, prompt: Prompt.new, ui: nil, plan_mode: PlanMode.new)
       @policy = policy
       @prompt = prompt
       @ui = ui
+      @plan_mode = plan_mode
     end
 
     def self.dangerous?(command)
       DANGEROUS_PATTERNS.any? { |pattern| command.to_s.match?(pattern) }
     end
 
-    # true — команду можно выполнять.
+    # Что делать с командой: :allow — выполнять, :cancelled — человек
+    # отказался, :planning — режим планирования не выполняет ничего, кроме
+    # чтения. Символ, а не булев признак: два отказа объясняются модели
+    # по-разному, и различить их постфактум было бы не по чему.
     #
-    # Порядок ветвлений существен. Денилист проверяется раньше списка
-    # читающих: у команды с подстановкой или перенаправлением ReadOnly и так
-    # ответит «нет», но полагаться на это нельзя — при добавлении в список
-    # чего-нибудь вроде `find` опасная форма прошла бы молча.
-    def authorize?(command)
+    # Порядок ветвлений существен, и режим планирования стоит первым — раньше
+    # даже денилиста. Иначе на `rm -rf` в планировании появился бы вопрос
+    # «выполнять?» — предложение сделать ровно то, ради невыполнения чего
+    # режим и включён.
+    #
+    # Дальше денилист проверяется раньше списка читающих: у команды с
+    # подстановкой или перенаправлением ReadOnly и так ответит «нет», но
+    # полагаться на это нельзя — при добавлении в список чего-нибудь вроде
+    # `find` опасная форма прошла бы молча.
+    def verdict(command)
+      return :planning unless @plan_mode.allows?(command)
+
       dangerous = self.class.dangerous?(command)
 
       if @policy == :unsafe
         warn_only(command) if dangerous
-        return true
+        return :allow
       end
 
-      return confirm?(Messages::DANGEROUS_COMMAND, command) if dangerous
-      return true if @policy == :deny || ReadOnly.command?(command)
+      return confirmed(Messages::DANGEROUS_COMMAND, command) if dangerous
+      return :allow if @policy == :deny || ReadOnly.command?(command)
 
-      confirm?(Messages::WRITING_COMMAND, command)
+      confirmed(Messages::WRITING_COMMAND, command)
     end
 
     private
 
-    def confirm?(warning, command)
+    def confirmed(warning, command)
       @ui&.warn(format(warning, command: command))
-      @prompt.confirm?(Messages::CONFIRM_PROMPT)
+      @prompt.confirm?(Messages::CONFIRM_PROMPT) ? :allow : :cancelled
     end
 
     # Предупреждаем только об опасном: при :unsafe человек уже сказал, что

@@ -3,13 +3,15 @@
 module MiniAgent
   # Цикл агента: запрос к модели → выполнение инструментов → повтор.
   class Agent
-    def initialize(config:, client:, tools:, ui:, history: History.new, prompt: nil, auto_compactor: nil)
+    def initialize(config:, client:, tools:, ui:, history: History.new, prompt: nil, auto_compactor: nil,
+                   plan_mode: PlanMode.new)
       @config = config
       @client = client
       @tools = tools
       @ui = ui
       @history = history
       @prompt = prompt
+      @plan_mode = plan_mode
       @tool_runner = ToolCallRunner.new(tools: tools, ui: ui)
       # Подменяем в тестах: иначе проверка цикла ходов требовала бы настоящего
       # переполнения окна, то есть настоящего сервера с настоящим usage.
@@ -23,6 +25,13 @@ module MiniAgent
     # «контекст сейчас». Разведи их — и сброс уходил бы в один объект,
     # а /context показывал бы другой.
     def usage = @history.usage
+
+    # Режим планирования. Открыт наружу ради Repl — по той же причине, по
+    # которой ему открыт new_conversation: тот же объект нужен и агенту
+    # (он подставляет инструкцию в задачу), и CommandGuard (он отвергает
+    # по нему команды), и самому Repl (/plan его переключает). Второй такой
+    # объект означал бы включённый режим, о котором не знает охрана команд.
+    attr_reader :plan_mode
 
     # Пустая история со всем, что агенту для неё нужно. Repl зовёт этот же
     # метод по /clear: команда начинает диалог заново, и без общей точки
@@ -56,6 +65,14 @@ module MiniAgent
       result
     end
 
+    # Задача в режиме планирования: изучить, показать план и спросить, надо ли
+    # его выполнять. Живёт здесь по той же причине, что и init: работа идёт
+    # обычным циклом ходов, а Prompt у агента уже есть. Сам разговор — в
+    # Planner.
+    def plan(task, conversation)
+      Planner.new(agent: self, plan_mode: @plan_mode, ui: @ui, prompt: @prompt).call(task, conversation)
+    end
+
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
     # это позволяет интерактивному режиму продолжать диалог с накопленной
     # историей, передавая её обратно через conversation:.
@@ -67,6 +84,9 @@ module MiniAgent
       # Сбрасывается на каждой задаче: в интерактивном режиме провал одной
       # не должен помечать всю сессию до самого выхода.
       @outcome = :ok
+      # По той же причине: ответ относится к задаче. Без сброса Planner
+      # принял бы за план прошлый ответ, если новая задача его не дала.
+      @answer = nil
       # По той же причине, что и outcome: счёт повторов относится к задаче,
       # а не к сессии, и без сброса «покажи файлы» дважды подряд разными
       # задачами выглядело бы зацикливанием.
@@ -80,6 +100,12 @@ module MiniAgent
       # Отметка отката берётся после: свернувшись, история сменила объект.
       conversation = @auto_compactor.call(conversation)
       mark = conversation.mark
+      # Инструкция режима идёт отдельным сообщением перед задачей и повторяется
+      # с каждой: системный промпт собран на старте, а режим включают посреди
+      # сессии — переписать его на месте значило бы выбросить историю (тот же
+      # довод, что у /init и описания проекта). Повтор вдобавок переживает
+      # сворачивание, после которого в истории от инструкции ничего не остаётся.
+      conversation.user(Messages::PLAN_INSTRUCTION) if user_message && @plan_mode.on?
       conversation.user(user_message) if user_message
 
       turns(conversation, mark)
@@ -89,6 +115,14 @@ module MiniAgent
     # или :unfinished (кончились ходы). По этому признаку CLI выбирает код
     # возврата: без него агент возвращал 0 даже когда не сделал ничего.
     attr_reader :outcome
+
+    # Последний ответ модели текстом, nil — если задача до него не дошла.
+    # Заводится ради Planner: план и есть ответ, а доставать его из истории
+    # значило бы доставать то, что автоматическое сворачивание могло уже
+    # заменить резюме. Итог по исчерпанным ходам сюда не попадает намеренно
+    # (см. summarize): там модель подводит черту под сделанным, и выдать это
+    # за план значило бы предложить к выполнению отчёт.
+    attr_reader :answer
 
     def failed? = @outcome == :failed
 
@@ -213,6 +247,7 @@ module MiniAgent
         # человек. Задача при этом выполненной не считается только в первом
         # случае — здесь есть что читать.
         @ui.warn(format(Messages::TRUNCATED_ANSWER, limit: @config.max_tokens)) if truncated?(finish_reason)
+        @answer = content
         conversation.assistant(content, usage: usage)
       end
       conversation

@@ -40,9 +40,14 @@ module MiniAgent
         command = arguments["command"].to_s
         return Messages::EMPTY_COMMAND if command.strip.empty?
 
-        return Messages::CANCELLED unless @guard.authorize?(command)
-
-        execute(command)
+        # Два отказа с разным объяснением: человек отклонил именно эту команду
+        # (пробовать иначе можно) — или идёт планирование, где не выполняется
+        # целый класс команд и следующая попытка кончится тем же.
+        case @guard.verdict(command)
+        when :cancelled then Messages::CANCELLED
+        when :planning then Messages::PLAN_REFUSED
+        else execute(command)
+        end
       end
 
       private

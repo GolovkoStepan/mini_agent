@@ -136,6 +136,48 @@ module MiniAgent
       Do not print the whole file in your reply — say what you put in it.
     PROMPT
 
+    # Режим планирования, сообщение МОДЕЛИ. Ставится перед задачей отдельным
+    # user-сообщением, а не подмешивается в системный промпт: тот собирается
+    # один раз на всю историю, а режим включают и выключают посреди сессии.
+    #
+    # Ограничения названы поимённо, вплоть до `find` и `2>/dev/null`, потому
+    # что иначе модель узнаёт о них единственным способом — отказом, а каждый
+    # отказ стоит хода. Замер на живом исследовании этого репозитория: из
+    # 17 команд ReadOnly отверг бы 3, и все три — этих двух видов.
+    #
+    # Про «не искать обход» сказано прямо: без этого модель на отказ отвечает
+    # тем же действием в другой обёртке (кавычки, переменная, echo в файл) —
+    # то, от чего фильтр всё равно не защищает, но что здесь просто тратит ходы.
+    PLAN_INSTRUCTION = <<~PROMPT
+      Planning mode is on. Investigate first, then answer with a plan.
+      Do not carry the plan out: the user will be asked whether to run it.
+
+      Only commands that provably read are executed: ls, cat, head, tail, grep,
+      wc, file, git log, git status, git diff and the like. Everything else is
+      refused — including `find`, output redirection and the `2>/dev/null`
+      idiom. Use ls, grep and `git ls-files` instead. Do not look for a way
+      around a refusal: it comes from the mode, not from your command.
+
+      Answer with the plan itself: numbered steps, each naming the files it
+      touches and the commands it runs. Say what you could not check and why.
+    PROMPT
+
+    # Одобренный план возвращается модели её же словами. Роль user, а не
+    # system, по той же причине, что и STOP_MAX_TURNS: шаблоны чата ряда
+    # моделей принимают system только первым сообщением.
+    #
+    # План повторяется целиком, хотя он уже есть в истории выше: между
+    # планированием и одобрением мог пройти /compact — свой или автоматический.
+    PLAN_EXECUTE = <<~PROMPT
+      The user approved the plan below. Carry it out step by step, starting
+      now. Do not ask for confirmation again and do not restate the plan —
+      report what you actually did and what came out of it.
+
+      <approved_plan>
+      %<plan>s
+      </approved_plan>
+    PROMPT
+
     COMPACT_REQUEST = <<~PROMPT
       Summarize this entire conversation into a compact handover note.
       It will REPLACE the conversation: everything you omit is lost.
@@ -197,6 +239,18 @@ module MiniAgent
       # режиме — история остаётся, и без ответа на вызов в ней была бы дыра.
       LOOPED = "🔁 Эта команда вызвана третий раз подряд с теми же аргументами. Она не " \
                "выполнялась; задача остановлена."
+      # Отказ режима планирования. Объясняется так же подробно, как CANCELLED,
+      # и по той же причине — на коротком отказе модель рапортует о сделанном.
+      # Отличается от него по существу: там человек отклонил именно эту
+      # команду, здесь не выполняется целый класс команд, и следующая попытка
+      # кончится тем же. Разведены поэтому: «попробуйте иначе» и «опишите это
+      # шагом плана» — разные указания, и второе здесь единственно верное.
+      PLAN_REFUSED = "📋 Идёт планирование: команда НЕ выполнялась, ничего не изменилось " \
+                     "и не создано. В этом режиме выполняются только заведомо читающие " \
+                     "команды (ls, cat, grep, git log и подобные), и обойти отказ нельзя — " \
+                     "он относится к режиму, а не к этой команде. Место такой команды " \
+                     "в плане: опиши её отдельным шагом и продолжай изучение теми " \
+                     "командами, что доступны."
       EXIT_CODE = "Код выхода: %<code>d"
       STDERR_SECTION = "\nSTDERR:\n%<stderr>s"
       TRUNCATED_SUFFIX = "\n... (truncated)"
@@ -210,6 +264,7 @@ module MiniAgent
     EXECUTION_TIMEOUT = Tool::EXECUTION_TIMEOUT
     EXECUTION_FAILED = Tool::EXECUTION_FAILED
     CANCELLED = Tool::CANCELLED
+    PLAN_REFUSED = Tool::PLAN_REFUSED
     EXIT_CODE = Tool::EXIT_CODE
     STDERR_SECTION = Tool::STDERR_SECTION
     TRUNCATED_SUFFIX = Tool::TRUNCATED_SUFFIX
@@ -341,6 +396,7 @@ module MiniAgent
     OPT_BASE_URL = "Базовый URL LLM-сервера"
     OPT_MODEL = "Имя модели"
     OPT_LIST_MODELS = "Показать модели, загруженные на сервере"
+    OPT_PLAN = "Режим планирования: изучить и напечатать план, ничего не меняя"
     OPT_CWD = "Рабочий каталог для команд агента"
     OPT_LOG = "Писать транскрипт диалога в файл (JSONL)"
     OPT_HELP = "Показать справку"
@@ -529,6 +585,33 @@ module MiniAgent
     # Модель охотно рапортует об успехе, не выполнив записи. Проверяется файл.
     INIT_MISSING = "Модель не создала %<name>s. Описание проекта не записано."
     INIT_SIZE_UNKNOWN = "размер неизвестен"
+
+    # --- Режим планирования ---
+    CMD_PLAN = "изучить и предложить план, ничего не меняя"
+    # Что именно перестало быть можно — сказано сразу: без этого включённый
+    # режим замечают по первому отказу, посреди чужой задачи.
+    PLAN_ON = "Режим планирования включён: только чтение, в конце — план. " \
+              "Повторный /plan выключает его."
+    PLAN_OFF = "Режим планирования выключен."
+    PLAN_CONFIRM = "Выполнять этот план? (y/N): "
+    # Про выключенный режим говорится здесь, а не молчанием: дальше агент
+    # начнёт менять файлы, и это ровно тот переход, который нельзя проглядеть.
+    PLAN_APPROVED = "План принят. Режим планирования выключен, выполняю."
+    PLAN_KEPT = "Остаёмся в планировании: уточните план следующей задачей или /plan, чтобы выйти."
+    # Ответа с планом не пришло — прерванная задача, неудачный запрос или
+    # исчерпанные ходы (итог по лимиту ходов планом не считается: там модель
+    # подводит черту под сделанным, а не предлагает порядок действий). Вопрос
+    # «выполнять ли» без плана перед ним выглядел бы предложением выполнить
+    # неизвестно что.
+    PLAN_MISSING = "Плана нет: задача не дошла до ответа. Повторите её или /plan, чтобы выйти."
+    # /init пишет файл, то есть делает ровно то, что режим запрещает.
+    # Отказ здесь, а не отказом инструмента: иначе модель полкруга ходов
+    # изучает проект, а записать его в конце не может.
+    PLAN_INIT_BLOCKED = "/init пишет файл, а в режиме планирования агент ничего не меняет. " \
+                        "Выйдите из него: /plan."
+    # Разовый запуск с --plan: план напечатан и на этом всё. Без строки
+    # ответ модели выглядит как отчёт о сделанном.
+    PLAN_ONE_SHOT = "План не выполнялся: с --plan агент только предлагает порядок действий."
 
     CMD_UNKNOWN = "Неизвестная команда: /%<name>s. /help — список."
     # Ctrl+C прерывает задачу, а не сессию: история цела, можно продолжать.

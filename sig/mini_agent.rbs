@@ -42,6 +42,12 @@ module MiniAgent
     def self.bold: (untyped text, ?enabled: bool) -> String
   end
 
+  module Paths
+    def self.directory: (untyped value) -> String?
+    def self.file: (untyped value) -> String?
+    def self.expand: (untyped value) -> String?
+  end
+
   class Config
     DEFAULTS: Hash[Symbol, untyped]
     ENV_KEYS: Hash[Symbol, String]
@@ -61,6 +67,7 @@ module MiniAgent
     def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
     def max_tokens: () -> Integer
     def allow_unsafe?: () -> bool
+    def plan?: () -> bool
     def stream?: () -> bool
     def auto_compact?: () -> bool
     def chat_uri: () -> URI::Generic
@@ -192,6 +199,11 @@ module MiniAgent
     def call: (Conversation conversation) -> Conversation
   end
 
+  class Planner
+    def initialize: (agent: Agent, plan_mode: PlanMode, ui: UI, ?prompt: Prompt?) -> void
+    def call: (String task, Conversation conversation) -> Conversation
+  end
+
   class ProcessRunner
     class Result < Struct[untyped]
       attr_accessor stdout: String
@@ -229,13 +241,25 @@ module MiniAgent
     def self.command?: (String? command) -> bool
   end
 
+  class PlanMode
+    attr_accessor plan: String?
+
+    def initialize: (?enabled: bool) -> void
+    def on?: () -> bool
+    def enable: () -> self
+    def disable: () -> self
+    def allows?: (String command) -> bool
+  end
+
   class CommandGuard
+    type verdict = :allow | :cancelled | :planning
+
     DANGEROUS_PATTERNS: Array[Regexp]
     POLICIES: Array[Symbol]
 
-    def initialize: (?policy: Symbol, ?prompt: untyped, ?ui: UI?) -> void
+    def initialize: (?policy: Symbol, ?prompt: untyped, ?ui: UI?, ?plan_mode: PlanMode) -> void
     def self.dangerous?: (String command) -> bool
-    def authorize?: (String command) -> bool
+    def verdict: (String command) -> verdict
   end
 
   module Tools
@@ -404,11 +428,14 @@ module MiniAgent
     type outcome = :ok | :failed | :unfinished
 
     attr_reader outcome: outcome
+    attr_reader answer: String?
+    attr_reader plan_mode: PlanMode
 
-    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History, ?prompt: Prompt?, ?auto_compactor: AutoCompactor?) -> void
+    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History, ?prompt: Prompt?, ?auto_compactor: AutoCompactor?, ?plan_mode: PlanMode) -> void
     def new_conversation: () -> Conversation
     def compact: (Conversation conversation) -> Conversation
     def init: (Conversation conversation) -> Conversation
+    def plan: (String task, Conversation conversation) -> Conversation
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def failed?: () -> bool
     def usage: () -> Usage
@@ -427,7 +454,7 @@ module MiniAgent
 
   class SlashCommands
     # Команды, меняющие состояние сессии: исполняет их Repl, а не сами команды.
-    type verdict = :clear | :compact | :init | :exit
+    type verdict = :clear | :compact | :init | :plan | :exit
 
     PATTERN: Regexp
     BARE_EXIT: Array[String]

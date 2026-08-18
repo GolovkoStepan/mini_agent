@@ -50,6 +50,7 @@ module MiniAgent
       [:stream, "--[no-]stream", Messages::OPT_STREAM],
       [:auto_compact, "--[no-]auto-compact", Messages::OPT_AUTO_COMPACT],
       [:policy, "--policy NAME", Messages::OPT_POLICY],
+      [:plan, "--plan", Messages::OPT_PLAN],
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
       [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
       [:cwd, "--cwd DIR", Messages::OPT_CWD],
@@ -104,6 +105,11 @@ module MiniAgent
 
       with_connection(config, ui) do |agent|
         agent.run(task)
+        # Про невыполненный план говорится прямо: ответ модели — это план,
+        # и без строки под ним он читается как отчёт о сделанном. Вопроса
+        # «выполнять?» здесь нет намеренно: разовый запуск на то и разовый,
+        # а согласие спрашивают в интерактивном режиме, где есть у кого.
+        ui.puts(Messages::PLAN_ONE_SHOT) if config.plan?
         EXIT_CODES.fetch(agent.outcome, EXIT_OK)
       end
     end

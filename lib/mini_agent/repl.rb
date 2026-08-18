@@ -13,6 +13,9 @@ module MiniAgent
       @config = config
       @ui = ui
       @reader = reader || LineReader.new
+      # Тот же объект, что у агента и у охраны команд: свой означал бы
+      # включённый режим, о котором не знает ни один из них.
+      @plan_mode = agent.plan_mode
       @commands = SlashCommands.new(config: config, tools: tools, ui: ui, usage: agent.usage)
     end
 
@@ -85,9 +88,44 @@ module MiniAgent
       when :handled then conversation
       when :clear then clear
       when :compact then @agent.compact(conversation)
-      when :init then @agent.init(conversation)
-      else @agent.run(task, conversation: conversation)
+      when :init then init(conversation)
+      when :plan then toggle_plan(conversation)
+      else run_task(task, conversation)
       end
+    end
+
+    # В режиме планирования задача идёт через Planner: тот доводит её до плана
+    # и спрашивает, выполнять ли. Ветвление здесь, а не внутри Agent#run,
+    # потому что вопрос человеку задавать можно не всегда: разовый запуск
+    # с --plan печатает план и выходит.
+    def run_task(text, conversation)
+      return @agent.plan(text, conversation) if @plan_mode.on?
+
+      @agent.run(text, conversation: conversation)
+    end
+
+    # /init пишет файл — то самое, чего режим планирования не делает. Отказ
+    # стоит здесь, а не приходит отказом инструмента: иначе агент потратил бы
+    # полдюжины ходов на изучение проекта и не смог бы записать результат.
+    def init(conversation)
+      return @agent.init(conversation) unless @plan_mode.on?
+
+      @ui.warn(Messages::PLAN_INIT_BLOCKED)
+      conversation
+    end
+
+    # Переключатель, а не две команды: включённый режим виден по строке при
+    # включении и по отказам в работе, а /plan набирают, когда хотят сменить
+    # положение — какое именно, человек и так знает.
+    def toggle_plan(conversation)
+      if @plan_mode.on?
+        @plan_mode.disable
+        @ui.puts(Messages::PLAN_OFF)
+      else
+        @plan_mode.enable
+        @ui.puts(Messages::PLAN_ON)
+      end
+      conversation
     end
 
     def new_conversation
