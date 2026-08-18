@@ -181,9 +181,19 @@ RSpec.describe MiniAgent::StreamParser do
       expect(parser.reasoning_tail).to eq("Надо подумать")
     end
 
-    # В строку помещается не больше ширины терминала; держать ради этого
-    # всю цепочку рассуждений — десятки тысяч знаков, которых никто не увидит.
-    it "держит только хвост" do
+    # Текст целиком нужен журналу: при обрыве ответа по нему разбирают,
+    # на что модель потратила бюджет. Показывается при этом только хвост.
+    it "хранит размышления целиком" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "старое" * 500 }))
+
+      expect(parser.reasoning.length).to eq(3000)
+      expect(parser.reasoning_length).to eq(3000)
+    end
+
+    # В строку помещается не больше ширины терминала; показывать всю цепочку
+    # рассуждений некуда, даже когда она вся под рукой.
+    it "показывает только хвост" do
       parser = described_class.new
       parser.feed(chunk({ "reasoning_content" => "старое" * 500 }))
       parser.feed(chunk({ "reasoning_content" => "свежее" }))

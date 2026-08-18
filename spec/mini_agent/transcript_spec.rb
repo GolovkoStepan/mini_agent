@@ -138,4 +138,32 @@ RSpec.describe MiniAgent::Transcript do
       expect(records[1]["before"]).to eq(1500)
     end
   end
+
+  # Размышления в историю не попадают вовсе, и журнал — единственное место,
+  # где их видно. Нужны они ровно в том случае, ради которого лог и заводят:
+  # при обрыве ответа иначе известно только, что текста нет, а не на чём
+  # модель его потратила.
+  describe "размышления модели" do
+    it "пишет их отдельной записью, а не полем сообщения" do
+      log = described_class.new(path)
+      log.reasoning("надо посчитать 17*23")
+      log.message({ role: "assistant", content: "391" })
+      log.close
+
+      expect(records.map { |r| r["type"] }).to eq(%w[reasoning message])
+      expect(records.first["content"]).to eq("надо посчитать 17*23")
+      expect(records.last).not_to have_key("reasoning")
+    end
+
+    # Модель без размышлений — обычное дело, и пустая запись на каждый ход
+    # только мешала бы читать лог.
+    it "молчит, когда размышлений не было" do
+      log = described_class.new(path)
+      log.reasoning("")
+      log.reasoning(nil)
+      log.close
+
+      expect(records).to be_empty
+    end
+  end
 end

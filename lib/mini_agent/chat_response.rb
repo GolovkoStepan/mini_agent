@@ -42,6 +42,12 @@ module MiniAgent
 
     def content = (@message["content"] || "").strip
     def tool_calls = @message["tool_calls"] || []
+
+    # Размышления модели. В кортеж не входят и агенту не показываются:
+    # здесь они приходят разом в конце, показывать их по ходу дела нечему.
+    # Нужны журналу — по ним разбирают обрыв ответа.
+    def reasoning = @message["reasoning_content"].to_s
+
     def usage = @data["usage"]
     def finish_reason = @data.dig("choices", 0, "finish_reason")
     def truncated? = finish_reason == TRUNCATED

@@ -21,7 +21,9 @@ module MiniAgent
     def call
       log = transcript
       detect_window
-      client = LLMClient.new(config: @config, ui: @ui)
+      # Журнал уходит и клиенту: размышления модели приходят в ответе и
+      # в историю не попадают, так что записать их больше неоткуда.
+      client = LLMClient.new(config: @config, ui: @ui, transcript: log)
       tools = build_tools
 
       client.start do |connected|

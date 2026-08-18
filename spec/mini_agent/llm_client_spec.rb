@@ -14,9 +14,10 @@ RSpec.describe MiniAgent::LLMClient do
 
   subject(:client) { described_class.new(config: config) }
 
-  def chat_response(content: "готово", tool_calls: nil, usage: nil, finish_reason: nil)
+  def chat_response(content: "готово", tool_calls: nil, usage: nil, finish_reason: nil, reasoning: nil)
     message = { "role" => "assistant", "content" => content }
     message["tool_calls"] = tool_calls if tool_calls
+    message["reasoning_content"] = reasoning if reasoning
     choice = { "message" => message }
     choice["finish_reason"] = finish_reason if finish_reason
     body = { "choices" => [choice] }
@@ -577,6 +578,50 @@ RSpec.describe MiniAgent::LLMClient do
       stub_request(:get, models_endpoint).to_return(status: 200, body: body)
 
       expect { client.models }.to raise_error(MiniAgent::LLMError, /Unexpected endpoint/)
+    end
+  end
+
+  # Размышления приходят в ответе, но в историю не идут никогда — значит,
+  # и в Conversation, откуда журнал ведётся обычно, они не попадают. Отсюда
+  # журнал у клиента: другого места, где их видно, попросту нет.
+  describe "журнал размышлений" do
+    let(:transcript) { instance_spy(MiniAgent::Transcript) }
+
+    it "пишет размышления обычного ответа" do
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response(reasoning: "надо посчитать"))
+
+      described_class.new(config: config, transcript: transcript).chat(messages)
+
+      expect(transcript).to have_received(:reasoning).with("надо посчитать")
+    end
+
+    # В кортеж они не входят: агент их не показывает и в историю не кладёт,
+    # а пятый элемент пришлось бы разбирать всюду, где разбирают ответ.
+    it "не подмешивает их в возвращаемое значение" do
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response(reasoning: "надо посчитать"))
+
+      result = described_class.new(config: config, transcript: transcript).chat(messages)
+
+      expect(result.size).to eq(4)
+      expect(result.first).to eq("готово")
+    end
+
+    it "пишет размышления, собранные из потока" do
+      streaming = MiniAgent::Config.new({ base_url: base_url, model: "test-model", retry_delay: 0 }, env: {})
+      body = "data: #{{ "choices" => [{ "index" => 0, "delta" => { "reasoning_content" => "надо " } }] }.to_json}\n\n" \
+             "data: #{{ "choices" => [{ "index" => 0, "delta" => { "reasoning_content" => "подумать" },
+                                        "finish_reason" => "stop" }] }.to_json}\n\ndata: [DONE]\n\n"
+      stub_request(:post, endpoint).to_return(status: 200, body: body)
+
+      described_class.new(config: streaming, transcript: transcript).chat(messages)
+
+      expect(transcript).to have_received(:reasoning).with("надо подумать")
+    end
+
+    it "работает без журнала" do
+      stub_request(:post, endpoint).to_return(status: 200, body: chat_response(reasoning: "надо посчитать"))
+
+      expect { client.chat(messages) }.not_to raise_error
     end
   end
 

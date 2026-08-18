@@ -98,6 +98,7 @@ module MiniAgent
     def path: () -> String
     def session: (Config config) -> void
     def message: (message) -> void
+    def reasoning: (String? text) -> void
     def rollback: (Integer count) -> void
     def compact: (before: Integer) -> void
     def close: () -> void
@@ -319,11 +320,12 @@ module MiniAgent
 
     attr_reader usage: json_object?
     attr_reader finish_reason: String?
-    attr_reader reasoning_length: Integer
-    attr_reader reasoning_tail: String
+    attr_reader reasoning: String
 
     def initialize: () ?{ (String) -> void } -> void
     def feed: (String chunk) -> void
+    def reasoning_length: () -> Integer
+    def reasoning_tail: () -> String
     def content: () -> String
     def tool_calls: () -> Array[tool_call]
     def empty?: () -> bool
@@ -369,6 +371,7 @@ module MiniAgent
     def initialize: (json_object data, json_object message) -> void
     def content: () -> String
     def tool_calls: () -> Array[tool_call]
+    def reasoning: () -> String
     def usage: () -> json_object?
     def finish_reason: () -> String?
     def truncated?: () -> bool
@@ -379,7 +382,7 @@ module MiniAgent
     RETRIABLE: Array[Class]
     OPEN_TIMEOUT: Integer
 
-    def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped) -> void
+    def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped, ?transcript: Transcript?) -> void
     def start: [T] () { (LLMClient) -> T } -> T
     def chat: (Array[message] messages, ?tools: Array[json_object], ?tool_choice: String, ?visible: bool) -> [String, Array[tool_call], json_object?, String?]
     def models: () -> Array[String]

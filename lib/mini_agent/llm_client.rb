@@ -15,10 +15,14 @@ module MiniAgent
 
     OPEN_TIMEOUT = 10
 
-    def initialize(config:, ui: nil, sleeper: method(:sleep))
+    # transcript — журнал, и попадает он сюда, а не только в Conversation,
+    # ради размышлений модели: те приходят в ответе, но в историю не идут
+    # никогда, так что другого места, где их видно, попросту нет.
+    def initialize(config:, ui: nil, sleeper: method(:sleep), transcript: nil)
       @config = config
       @ui = ui
       @sleeper = sleeper
+      @transcript = transcript
       @http = nil
       @retry_after = nil
       @stream = nil
@@ -143,7 +147,10 @@ module MiniAgent
       return interpret_stream if @stream
 
       parsed, reason = ChatResponse.parse(response.body)
-      return parsed.to_a if parsed
+      if parsed
+        @transcript&.reasoning(parsed.reasoning)
+        return parsed.to_a
+      end
 
       @ui&.error(reason)
       @last_reason = reason
@@ -154,6 +161,9 @@ module MiniAgent
     # значит и почему их нельзя путать, см. StreamParser#empty?. Здесь
     # остаётся решение: такую попытку следует повторить.
     def interpret_stream
+      # Размышления пишутся и у несостоявшегося потока: там их не бывает,
+      # но проверять это здесь значило бы знать, чего не бывает у сервера.
+      @transcript&.reasoning(@stream.reasoning)
       return @stream.to_a unless @stream.empty?
 
       @ui&.error(Messages::EMPTY_STREAM)
