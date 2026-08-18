@@ -68,6 +68,28 @@ RSpec.describe MiniAgent::Agent do
       expect(out.string).not_to include("пустой ответ")
     end
 
+    # Лимит и есть потолок — флаг тут действительно помогает.
+    it "советует поднять лимит, когда окно неизвестно" do
+      allow(client).to receive(:chat).and_return(["", [], nil, "length"])
+
+      agent.run("задача")
+
+      expect(out.string).to include("--max-tokens")
+    end
+
+    # Замер на окне 8192: обрыв пришёлся на 8156 токенах, то есть упор был
+    # в окно. Совет крутить --max-tokens здесь уводит от лечения — поднимать
+    # надо окно на сервере.
+    it "не советует поднимать лимит, выведенный из окна" do
+      config.context_window = 8192
+      allow(client).to receive(:chat).and_return(["", [], nil, "length"])
+
+      agent.run("задача")
+
+      expect(out.string).to include("max_tokens: 4096", "контекстного окна (8192)", "на сервере")
+      expect(out.string).not_to include("--max-tokens")
+    end
+
     # Задача не выполнена — код возврата обязан это показать.
     it "помечает задачу провалившейся" do
       allow(client).to receive(:chat).and_return(["", [], nil, "length"])

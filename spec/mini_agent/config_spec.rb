@@ -213,6 +213,38 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  # От происхождения лимита зависит совет при обрыве генерации: поднимать
+  # --max-tokens имеет смысл, только когда упор именно в него. При лимите,
+  # выведенном из окна, флаг перепишет цифру, а обрыв придёт на том же месте.
+  describe "происхождение максимума токенов" do
+    it "считает лимит выведенным, когда победила доля окна" do
+      config = described_class.new({}, env: {})
+      config.context_window = 8192
+
+      expect(config.max_tokens_derived?).to be(true)
+    end
+
+    # Здесь упор в потолок, а не в окно: половина от 262144 — это 131072,
+    # и лимит держит константа. Поднять её флагом как раз можно.
+    it "не считает выведенным лимит, упёршийся в потолок" do
+      config = described_class.new({}, env: {})
+      config.context_window = 262_144
+
+      expect(config.max_tokens_derived?).to be(false)
+    end
+
+    it "не считает выведенным значение, заданное человеком" do
+      config = described_class.new({ max_tokens: 3000 }, env: {})
+      config.context_window = 8192
+
+      expect(config.max_tokens_derived?).to be(false)
+    end
+
+    it "не считает выведенным умолчание при неизвестном окне" do
+      expect(described_class.new({}, env: {}).max_tokens_derived?).to be(false)
+    end
+  end
+
   # Ожидание ответа модели и таймаут команд bash — разные вещи, и держать
   # на них одно число значит, что правка ради медленной модели молча
   # продлит и зависшую команду.

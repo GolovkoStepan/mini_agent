@@ -182,6 +182,18 @@ module MiniAgent
 
       @failed = true
       @ui.error(format(Messages::TRUNCATED_EMPTY, limit: @config.max_tokens))
+      @ui.puts(truncated_hint)
+    end
+
+    # Лечение выбирается по происхождению лимита, а не печатается одно
+    # на все случаи. Прежний текст всегда советовал поднять --max-tokens,
+    # и при лимите, выведенном из окна, это ложный след: замер на окне 8192
+    # дал обрыв на 8156 токенах, то есть упор был в окно, а не в лимит, —
+    # флаг там не добавляет ни одного токена.
+    def truncated_hint
+      return Messages::TRUNCATED_HINT_LIMIT unless @config.max_tokens_derived?
+
+      format(Messages::TRUNCATED_HINT_WINDOW, window: @config.context_window)
     end
 
     def truncated?(finish_reason) = finish_reason == ChatResponse::TRUNCATED
