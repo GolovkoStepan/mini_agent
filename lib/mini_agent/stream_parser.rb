@@ -24,6 +24,7 @@ module MiniAgent
       @buffer = +""
       @content = +""
       @reasoning_length = 0
+      @reasoning_tail = +""
       @tool_calls = {}
       @usage = nil
       @finish_reason = nil
@@ -31,11 +32,22 @@ module MiniAgent
 
     attr_reader :usage, :finish_reason
 
-    # Сколько знаков размышлений уже пришло. Сам текст не копится: показывать
-    # его незачем (см. ROADMAP, «Замечено, но не заведено»), а в диагностике
-    # важен объём — по нему видно, на что модель тратит бюджет, когда ответ
-    # приходит пустым.
+    # Сколько знаков размышлений уже пришло. По нему видно, на что модель
+    # тратит бюджет, когда ответ приходит пустым.
     attr_reader :reasoning_length
+
+    # Хвост размышлений — то, что модель думает прямо сейчас. Показывается
+    # бегущей строкой в спиннере: объём отвечает на вопрос «занята ли она»,
+    # а чем именно занята, до этого было не видно вовсе — на длинной задаче
+    # это десятки тысяч знаков молчания.
+    #
+    # Копится ровно хвост, а не весь текст: в строку помещается не больше
+    # ширины терминала, а хранить ради этого всю цепочку рассуждений значит
+    # держать в памяти то, что никто не прочтёт. Запас против ширины нужен
+    # на схлопывание пробелов при отрисовке.
+    attr_reader :reasoning_tail
+
+    TAIL_LIMIT = 400
 
     # Кусок тела как он пришёл из сокета. Границы кусков не совпадают с
     # границами строк, поэтому хвост остаётся в буфере до следующего вызова.
@@ -111,7 +123,7 @@ module MiniAgent
     end
 
     def accumulate(delta)
-      @reasoning_length += delta["reasoning_content"].to_s.length if delta["reasoning_content"]
+      reason(delta["reasoning_content"]) if delta["reasoning_content"]
 
       text = delta["content"]
       if text && !text.empty?
@@ -120,6 +132,15 @@ module MiniAgent
       end
 
       merge_tool_calls(delta["tool_calls"])
+    end
+
+    # Хвост режется по знакам, а не по байтам: у русского текста срез по
+    # байтам разваливает букву надвое. Ошибка та же, что ловилась на границе
+    # кусков сокета, только с другого конца — здесь строка уже в UTF-8.
+    def reason(text)
+      @reasoning_length += text.length
+      @reasoning_tail << text
+      @reasoning_tail.slice!(0...-TAIL_LIMIT) if @reasoning_tail.length > TAIL_LIMIT
     end
 
     # Вызовы приходят кусками: первый несёт id и имя, следующие — куски

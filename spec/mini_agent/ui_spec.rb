@@ -356,6 +356,75 @@ RSpec.describe MiniAgent::UI do
 
         expect { ui.stop_spinner }.not_to raise_error
       end
+
+      # Счётчик отвечает на вопрос «занята ли модель», бегущая строка —
+      # «чем именно». На живой задаче счётчик доходил до 25 000 знаков,
+      # и всё это время о содержании работы не было известно ничего.
+      describe "бегущая строка" do
+        subject(:ui) { described_class.new(out: out, tty: true, spinner_interval: 0.01, spinner_width: 80) }
+
+        it "показывает текст размышлений" do
+          ui.ticker = "проверяю файл agent.rb"
+          ui.with_spinner { sleep 0.05 }
+
+          expect(out.string).to include("проверяю файл agent.rb")
+        end
+
+        # Хвост, а не начало: интересно то, что модель думает сейчас.
+        it "режет строку слева, оставляя свежее" do
+          ui.status = "ход 2/10"
+          ui.ticker = "#{"старое " * 40}свежее"
+          ui.with_spinner { sleep 0.05 }
+
+          expect(out.string).to include("свежее")
+        end
+
+        # Спиннер живёт в одной строке и перерисовывает её по \r: перевод
+        # строки внутри оставил бы на экране обрывки, до которых \e[K уже
+        # не дотянется.
+        it "схлопывает переводы строк" do
+          ui.ticker = "первая\nвторая"
+          ui.with_spinner { sleep 0.05 }
+
+          expect(out.string).to include("первая вторая")
+          expect(out.string).not_to include("первая\nвторая")
+        end
+
+        # Строка, заполнившая ширину ровно, переносится, и перерисовка по \r
+        # начинает мазать по экрану. Проверяется видимая длина — без ANSI.
+        it "не выходит за ширину терминала" do
+          ui.status = "ход 2/10"
+          ui.ticker = "мысль " * 100
+          ui.with_spinner { sleep 0.05 }
+
+          drawn = out.string.split("\r").map { |part| part.gsub(/\e\[[0-9;]*[A-Za-z]/, "") }
+          expect(drawn.map(&:length).max).to be < 80
+        end
+
+        # На узком терминале обрывок в несколько знаков не читается, а место
+        # отнимает у счётчика — там бегущая строка пропадает целиком.
+        it "пропадает, когда места не осталось" do
+          narrow = described_class.new(out: out, tty: true, spinner_interval: 0.01, spinner_width: 30)
+          narrow.status = "ход 2/10"
+          narrow.ticker = "мысль"
+          narrow.with_spinner { sleep 0.05 }
+
+          expect(out.string).to include("ход 2/10")
+          expect(out.string).not_to include("мысль")
+        end
+
+        # Гаснет вместе со спиннером: иначе размышления прошлого хода
+        # осели бы под следующим запросом.
+        it "гаснет вместе со спиннером" do
+          ui.ticker = "мысль"
+          ui.with_spinner { sleep 0.05 }
+          out.truncate(out.rewind)
+
+          ui.with_spinner { sleep 0.05 }
+
+          expect(out.string).not_to include("мысль")
+        end
+      end
     end
   end
 

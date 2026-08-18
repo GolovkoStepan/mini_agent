@@ -268,10 +268,11 @@ module MiniAgent
     INDENT: String
     SPINNER_INTERVAL: Float
 
-    def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric) -> void
+    def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric, ?spinner_width: Integer?) -> void
     def tty?: () -> bool
     def status=: (String? text) -> void
     def progress=: (String? text) -> void
+    def ticker=: (String? text) -> void
     def stream_chunk: (String text) -> void
     def stream_finish: () -> void
     def stop_spinner: () -> void
@@ -291,11 +292,15 @@ module MiniAgent
   class Spinner
     FRAMES: Array[String]
     INTERVAL: Float
+    DEFAULT_WIDTH: Integer
+    MIN_TICKER: Integer
+    TICKER_SEPARATOR: String
 
     attr_writer status: String?
     attr_writer progress: String?
+    attr_writer ticker: String?
 
-    def initialize: (ui: UI, ?enabled: bool, ?interval: Numeric) -> void
+    def initialize: (ui: UI, ?enabled: bool, ?interval: Numeric, ?width: Integer?) -> void
     def around: [T] () { () -> T } -> T
     def stop: () -> void
   end
@@ -310,10 +315,12 @@ module MiniAgent
   class StreamParser
     DATA_PREFIX: String
     DONE: String
+    TAIL_LIMIT: Integer
 
     attr_reader usage: json_object?
     attr_reader finish_reason: String?
     attr_reader reasoning_length: Integer
+    attr_reader reasoning_tail: String
 
     def initialize: () ?{ (String) -> void } -> void
     def feed: (String chunk) -> void

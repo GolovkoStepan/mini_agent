@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "io/console"
+
 module MiniAgent
   # Анимация ожидания в отдельном потоке.
   #
@@ -15,6 +17,16 @@ module MiniAgent
     FRAMES = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
     INTERVAL = 0.1
 
+    # Ширина терминала, когда узнать её не вышло: вывод перенаправлен,
+    # ioctl не отвечает, окна нет вовсе.
+    DEFAULT_WIDTH = 80
+
+    # Меньше этого места под бегущую строку не отводим. Обрывок в несколько
+    # знаков не читается вовсе, а строку удлиняет.
+    MIN_TICKER = 24
+
+    TICKER_SEPARATOR = "│ "
+
     # Строка состояния (например, «ход 2/10»): ставится один раз на ход
     # и живёт до конца запроса.
     attr_writer :status
@@ -23,14 +35,22 @@ module MiniAgent
     # меняется десятки раз в секунду и гаснет вместе со спиннером.
     attr_writer :progress
 
-    def initialize(ui:, enabled: true, interval: INTERVAL)
+    # Бегущая строка: сам текст размышлений, хвостом. Отдельно от progress
+    # потому, что у них разная судьба при нехватке места — счётчик короткий
+    # и показывается всегда, а бегущая строка занимает весь остаток ширины
+    # и на узком терминале пропадает целиком.
+    attr_writer :ticker
+
+    def initialize(ui:, enabled: true, interval: INTERVAL, width: nil)
       @ui = ui
       @enabled = enabled
       @interval = interval
+      @width = width
       @thread = nil
       @stop = false
       @status = nil
       @progress = nil
+      @ticker = nil
     end
 
     def around
@@ -54,6 +74,7 @@ module MiniAgent
       @thread.join
       @thread = nil
       @progress = nil
+      @ticker = nil
       @ui.print("\r\e[K")
     end
 
@@ -71,7 +92,7 @@ module MiniAgent
       Thread.new do
         index = 0
         until @stop
-          @ui.print("\r\e[K#{@ui.paint("#{FRAMES[index % FRAMES.size]} #{text}", :cyan)}")
+          @ui.print("\r\e[K#{line(FRAMES[index % FRAMES.size])}")
           index += 1
           sleep(@interval)
         end
@@ -81,8 +102,50 @@ module MiniAgent
       end
     end
 
+    # Бегущая строка приглушена серым: она справочная, и в одном цвете со
+    # спиннером перетягивала бы взгляд на себя. Длины считаются до раскраски —
+    # ANSI-коды занимают знаки в строке, но не на экране.
+    def line(frame)
+      head = "#{frame} #{text}"
+      tail = ticker_tail(head.length)
+      return @ui.paint(head, :cyan) if tail.empty?
+
+      "#{@ui.paint(head, :cyan)} #{@ui.paint("#{TICKER_SEPARATOR}#{tail}", :gray)}"
+    end
+
     def text
       [Messages::THINKING, @status, @progress].compact.join(" ")
+    end
+
+    # Хвост берётся с конца, а не с начала: интересно то, что модель думает
+    # сейчас, начало мысли уже уехало. Отсюда и «бегущая» — движение даёт
+    # сам приход текста, отдельного таймера для прокрутки не нужно.
+    #
+    # Пробельные последовательности схлопываются: строка одна и перерисовывает
+    # себя по \r, а любой перевод строки внутри неё оставил бы на экране
+    # обрывки, которые \e[K уже не достанет.
+    def ticker_tail(head_length)
+      return "" unless @ticker
+
+      # Знак пробела перед разделителем и один столбец справа: строка,
+      # заполнившая ширину ровно, переносится и рвёт перерисовку по \r.
+      room = width - head_length - TICKER_SEPARATOR.length - 2
+      return "" if room < MIN_TICKER
+
+      flat = @ticker.gsub(/\s+/, " ").strip
+      flat.length > room ? flat[-room..] : flat
+    end
+
+    # Ширина спрашивается на каждой отрисовке, а не запоминается: окно
+    # терминала меняют посреди работы, и запомненное даёт либо перенос
+    # строки, либо пустое место справа.
+    def width
+      return @width if @width
+
+      columns = IO.console&.winsize&.last.to_i
+      columns.positive? ? columns : DEFAULT_WIDTH
+    rescue StandardError
+      DEFAULT_WIDTH
     end
   end
 end

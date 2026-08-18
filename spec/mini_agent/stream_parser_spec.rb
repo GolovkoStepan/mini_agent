@@ -159,8 +159,8 @@ RSpec.describe MiniAgent::StreamParser do
   end
 
   describe "размышления" do
-    # Текст размышлений не копится — считается только объём: показывать их
-    # незачем, а в диагностике пустого ответа важно, на что ушёл бюджет.
+    # Объём нужен для диагностики пустого ответа: по нему видно, на что ушёл
+    # бюджет. В сам ответ размышления не попадают ни знаком.
     it "считает знаки reasoning_content, не смешивая с ответом" do
       parser = described_class.new
       parser.feed(chunk({ "reasoning_content" => "Надо подумать" }))
@@ -168,6 +168,38 @@ RSpec.describe MiniAgent::StreamParser do
 
       expect(parser.content).to eq("ответ")
       expect(parser.reasoning_length).to eq("Надо подумать".length)
+      expect(parser.reasoning_tail).to eq("Надо подумать")
+    end
+
+    # Дельты режутся сервером как попало, а бегущей строке нужен связный
+    # хвост — склейка обязана быть сквозной, а не поштучной.
+    it "склеивает хвост из дельт" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "Надо " }))
+      parser.feed(chunk({ "reasoning_content" => "подумать" }))
+
+      expect(parser.reasoning_tail).to eq("Надо подумать")
+    end
+
+    # В строку помещается не больше ширины терминала; держать ради этого
+    # всю цепочку рассуждений — десятки тысяч знаков, которых никто не увидит.
+    it "держит только хвост" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "старое" * 500 }))
+      parser.feed(chunk({ "reasoning_content" => "свежее" }))
+
+      expect(parser.reasoning_tail.length).to eq(described_class::TAIL_LIMIT)
+      expect(parser.reasoning_tail).to end_with("свежее")
+    end
+
+    # Срез по байтам развалил бы русскую букву надвое — та же ошибка,
+    # что ловилась на границе кусков сокета, только с другого конца.
+    it "режет хвост по знакам, а не по байтам" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "щ" * (described_class::TAIL_LIMIT + 10) }))
+
+      expect(parser.reasoning_tail).to eq("щ" * described_class::TAIL_LIMIT)
+      expect(parser.reasoning_tail).to be_valid_encoding
     end
   end
 

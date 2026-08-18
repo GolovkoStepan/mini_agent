@@ -38,10 +38,13 @@ module MiniAgent
 
     SPINNER_INTERVAL = Spinner::INTERVAL
 
-    def initialize(out: $stdout, tty: nil, spinner_interval: SPINNER_INTERVAL)
+    # spinner_width задаётся только в тестах — тем же приёмом, что и
+    # spinner_interval: настоящую ширину спиннер спрашивает у терминала,
+    # и она разная на каждой машине, а бегущая строка режется по ней.
+    def initialize(out: $stdout, tty: nil, spinner_interval: SPINNER_INTERVAL, spinner_width: nil)
       @out = out
       @tty = tty.nil? ? out.respond_to?(:tty?) && out.tty? : tty
-      @spinner = Spinner.new(ui: self, enabled: @tty, interval: spinner_interval)
+      @spinner = Spinner.new(ui: self, enabled: @tty, interval: spinner_interval, width: spinner_width)
       @streaming = false
       @streamed = false
     end
@@ -55,6 +58,10 @@ module MiniAgent
 
     def progress=(text)
       @spinner.progress = text
+    end
+
+    def ticker=(text)
+      @spinner.ticker = text
     end
 
     def tty? = @tty
