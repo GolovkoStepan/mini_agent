@@ -72,6 +72,87 @@ RSpec.describe MiniAgent::ToolCallRunner do
     end
   end
 
+  # Замечено живьём: модель пять раз подряд выдала один и тот же вызов
+  # и один и тот же пустой результат. При политике deny вопросов не задаётся,
+  # так что заметить это можно было только глазами, а стоил каждый холостой
+  # ход настоящего запроса и места в окне.
+  describe "повтор вызова" do
+    def run(arguments, id: "call_1")
+      runner.call(conversation, { "id" => id, "function" => { "name" => "echo", "arguments" => arguments } })
+    end
+
+    let(:args) { { "text" => "раз" }.to_json }
+
+    it "второй раз подряд не выполняет команду и возвращает прежний результат" do
+      run(args)
+      status = run(args)
+
+      expect(status).to eq(:ok)
+      expect(echo_tool.calls.length).to eq(1)
+      expect(conversation.to_a.last[:content]).to include("результат: раз")
+    end
+
+    # Приписка стоит перед результатом: длинный вывод отодвинул бы её в хвост,
+    # а короткого «уже выполнялось» модели мало — на нём она рапортует
+    # о сделанном (те же грабли, что у Messages::Tool::CANCELLED).
+    it "объясняет модели, что команда не выполнялась" do
+      run(args)
+      run(args)
+
+      content = conversation.to_a.last[:content]
+      expect(content).to include("НЕ выполнялась")
+      expect(content.index("НЕ выполнялась")).to be < content.index("результат: раз")
+    end
+
+    it "третий раз подряд обрывает задачу" do
+      run(args)
+      run(args)
+      status = run(args)
+
+      expect(status).to eq(:loop)
+      expect(echo_tool.calls.length).to eq(1)
+    end
+
+    # Модель ждёт ответа на каждый tool_call_id: брошенный без ответа вызов
+    # оставил бы в истории дыру, от которой валится следующий запрос.
+    it "и на обрыве отвечает на вызов" do
+      3.times { run(args, id: "call_7") }
+
+      message = conversation.to_a.last
+      expect(message[:role]).to eq("tool")
+      expect(message[:tool_call_id]).to eq("call_7")
+    end
+
+    it "не считает повтором вызов с другими аргументами" do
+      run({ "text" => "раз" }.to_json)
+      run({ "text" => "два" }.to_json)
+
+      expect(echo_tool.calls.length).to eq(2)
+    end
+
+    # Считаются только подряд идущие вызовы: чередование A, B, A здесь
+    # не ловится, и это осознанно — окна не заводим, пока такое чередование
+    # не встретится живьём.
+    it "сбрасывает счёт на другом вызове между одинаковыми" do
+      run({ "text" => "раз" }.to_json)
+      run({ "text" => "два" }.to_json)
+      run({ "text" => "раз" }.to_json)
+
+      expect(echo_tool.calls.length).to eq(3)
+    end
+
+    # Счёт относится к задаче, а не к сессии: объект один на агента, и без
+    # сброса первая команда новой задачи, совпавшая с последней командой
+    # прошлой, получила бы чужой результат вместо выполнения.
+    it "начинает счёт заново после reset" do
+      run(args)
+      runner.reset
+      run(args)
+
+      expect(echo_tool.calls.length).to eq(2)
+    end
+  end
+
   describe "усечение результата" do
     let(:long_tool) do
       Class.new do

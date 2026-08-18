@@ -225,8 +225,12 @@ RSpec.describe MiniAgent::Agent do
   end
 
   describe "лимит ходов" do
+    # Вызовы намеренно разные: одинаковые подряд обрывает защита от повтора,
+    # и до лимита ходов дело не дошло бы вовсе.
+    let(:working) { (1..4).map { |number| ["работаю", [tool_call(text: number.to_s)]] } }
+
     it "останавливается и запрашивает итог" do
-      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+      allow(client).to receive(:chat).and_return(*working)
 
       conversation = agent.run("задача")
 
@@ -239,7 +243,7 @@ RSpec.describe MiniAgent::Agent do
     # Шаблоны чата Qwen и ряда других моделей принимают system только первым
     # сообщением и отвечают HTTP 400 на system в середине истории.
     it "просит итог ролью user, а не system" do
-      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+      allow(client).to receive(:chat).and_return(*working)
 
       conversation = agent.run("задача")
       stop_message = conversation.to_a.find { |m| m[:content] == MiniAgent::Messages::STOP_MAX_TURNS }
@@ -250,7 +254,7 @@ RSpec.describe MiniAgent::Agent do
 
     # Иначе модель вернёт вызов инструмента, применить который уже негде.
     it "запрещает вызовы инструментов в суммирующем запросе" do
-      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+      allow(client).to receive(:chat).and_return(*working)
 
       agent.run("задача")
 
@@ -261,7 +265,7 @@ RSpec.describe MiniAgent::Agent do
     # этого признака CLI возвращал 0: задача сделана наполовину, а обёртка
     # считала её успешной.
     it "помечает задачу недоделанной" do
-      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+      allow(client).to receive(:chat).and_return(*working)
 
       agent.run("задача")
 
@@ -272,13 +276,65 @@ RSpec.describe MiniAgent::Agent do
     # Ставится ДО суммирующего запроса именно ради этого случая: сбой
     # последнего запроса важнее исчерпанных ходов, лечение у них разное.
     it "провал итогового запроса перебивает недоделанность" do
-      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+      allow(client).to receive(:chat).and_return(*working)
       allow(client).to receive(:chat).with(anything, hash_including(tool_choice: "none"))
                                      .and_raise(MiniAgent::LLMError, "сервер лёг")
 
       agent.run("задача")
 
       expect(agent.outcome).to eq(:failed)
+    end
+  end
+
+  # Замечено живьём: модель пять раз подряд выдала один и тот же вызов,
+  # получая один и тот же результат. Ходов хватало ещё на сорок пять,
+  # и каждый стоил настоящего запроса и места в окне.
+  describe "защита от повтора вызовов" do
+    let(:config) { MiniAgent::Config.new({ max_turns: 10 }, env: {}) }
+    let(:done) { ["готово", []] }
+
+    it "обрывает задачу на третьем одинаковом вызове" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+
+      agent.run("задача")
+
+      expect(client).to have_received(:chat).exactly(3).times
+      expect(echo_tool.calls.length).to eq(1), "второй и третий вызовы выполняться не должны"
+      expect(out.string).to include("зациклился")
+    end
+
+    # Тот же исход, что при исчерпанных ходах, и тот же код возврата 4:
+    # сервер работал, инструменты работали, задача не доделана.
+    it "помечает задачу недоделанной, но не сбойной" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+
+      agent.run("задача")
+
+      expect(agent.outcome).to eq(:unfinished)
+      expect(agent).not_to be_failed
+    end
+
+    # Итог у модели не спрашивается, в отличие от лимита ходов: за тот же
+    # запрос зациклившаяся модель вернёт ту же петлю.
+    it "не просит итог у зациклившейся модели" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+
+      agent.run("задача")
+
+      expect(client).not_to have_received(:chat).with(anything, hash_including(tool_choice: "none"))
+    end
+
+    # Счёт относится к задаче, а не к сессии: «покажи файлы» второй раз
+    # подряд в интерактивном режиме — обычное дело, и отвечать на него
+    # результатом прошлой задачи нельзя.
+    it "начинает счёт заново на новой задаче" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call]], done, ["работаю", [tool_call]], done)
+
+      conversation = agent.run("задача")
+      agent.run("та же задача", conversation: conversation)
+
+      expect(echo_tool.calls.length).to eq(2)
+      expect(agent.outcome).to eq(:ok)
     end
   end
 

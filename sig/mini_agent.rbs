@@ -390,9 +390,14 @@ module MiniAgent
 
   class ToolCallRunner
     MAX_TOOL_OUTPUT: Integer
+    REPEAT_LIMIT: Integer
+    LOOP_LIMIT: Integer
+
+    type status = :ok | :loop
 
     def initialize: (tools: ToolRegistry, ui: UI) -> void
-    def call: (Conversation conversation, tool_call tool_call) -> void
+    def reset: () -> void
+    def call: (Conversation conversation, tool_call tool_call) -> status
   end
 
   class Agent
