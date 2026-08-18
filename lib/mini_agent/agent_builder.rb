@@ -50,7 +50,10 @@ module MiniAgent
     # согласие на опасную команду: два разных Prompt на одних и тех же
     # потоках разошлись бы при первой же подмене ввода в тестах.
     def build_agent(client, tools, log)
-      history = History.new(project_context: project_context, transcript: log)
+      # Каталог тот же, что уходит в chdir: ProcessRunner (см. build_tools):
+      # промпт обязан называть место, где команды выполняются на самом деле,
+      # иначе он врёт убедительнее, чем молчит.
+      history = History.new(project_context: project_context, transcript: log, cwd: @config.cwd || Dir.pwd)
       Agent.new(config: @config, client: client, tools: tools, ui: @ui, history: history, prompt: prompt)
     end
 

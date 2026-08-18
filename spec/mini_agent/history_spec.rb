@@ -13,6 +13,15 @@ RSpec.describe MiniAgent::History do
     expect(conversation.last[:content]).to include("тесты: make spec")
   end
 
+  # Тем же путём, что описание проекта: не пробросив каталог сюда, после
+  # /clear и /compact агент снова начал бы его выдумывать — молча и до
+  # конца сессии.
+  it "подмешивает рабочий каталог в системный промпт" do
+    conversation = described_class.new(cwd: "/срез/проект").build
+
+    expect(conversation.last[:content]).to include("/срез/проект")
+  end
+
   it "передаёт журнал новой истории" do
     transcript = instance_spy(MiniAgent::Transcript)
 

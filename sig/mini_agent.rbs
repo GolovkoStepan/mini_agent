@@ -19,6 +19,7 @@ module MiniAgent
 
   module Messages
     SYSTEM_PROMPT: String
+    ENVIRONMENT: String
     STOP_MAX_TURNS: String
     EXIT_CODE_PATTERN: Regexp
 
@@ -107,12 +108,12 @@ module MiniAgent
     attr_reader transcript: Transcript?
     attr_reader usage: Usage
 
-    def initialize: (?project_context: String?, ?transcript: Transcript?) -> void
+    def initialize: (?project_context: String?, ?transcript: Transcript?, ?cwd: String?) -> void
     def build: () -> Conversation
   end
 
   class Conversation
-    def initialize: (?system_prompt: String?, ?project_context: String?, ?transcript: Transcript?) -> void
+    def initialize: (?system_prompt: String?, ?project_context: String?, ?transcript: Transcript?, ?cwd: String?) -> void
     def system: (String content) -> message
     def user: (String content) -> message
     def assistant: (String? content, ?tool_calls: Array[tool_call]?, ?usage: json_object?) -> message

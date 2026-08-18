@@ -21,9 +21,10 @@ module MiniAgent
     # переданный отдельно и Agent, и History, легко разъехался бы на два
     # объекта, и сброс уходил бы в тот, которого никто не показывает.
     # Agent берёт его отсюда же — так второму взяться неоткуда.
-    def initialize(project_context: nil, transcript: nil)
+    def initialize(project_context: nil, transcript: nil, cwd: nil)
       @project_context = project_context
       @transcript = transcript
+      @cwd = cwd
       @usage = Usage.new
     end
 
@@ -40,7 +41,7 @@ module MiniAgent
     # текущее (проверено живьём после /clear).
     def build
       @usage.reset_context
-      Conversation.new(project_context: @project_context, transcript: @transcript)
+      Conversation.new(project_context: @project_context, transcript: @transcript, cwd: @cwd)
     end
   end
 end

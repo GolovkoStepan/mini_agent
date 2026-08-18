@@ -50,6 +50,47 @@ RSpec.describe MiniAgent::Conversation do
     end
   end
 
+  # Промпт говорит, что `cd` не сохраняется между вызовами, но не говорил,
+  # где вызовы начинаются, — и модель выдумывала каталог. Живьём это выглядело
+  # как `cd: /home/user: No such file or directory`.
+  describe "рабочий каталог" do
+    it "называет каталог в системном промпте" do
+      conversation = described_class.new(system_prompt: "правила", cwd: "/срез/проект")
+
+      expect(conversation.size).to eq(1)
+      expect(conversation.last[:content]).to include("/срез/проект")
+    end
+
+    it "называет систему" do
+      conversation = described_class.new(system_prompt: "правила", cwd: "/срез/проект")
+
+      expect(conversation.last[:content]).to include(RbConfig::CONFIG["host_os"])
+    end
+
+    it "не меняет промпт, когда каталог неизвестен" do
+      conversation = described_class.new(system_prompt: "правила", cwd: nil)
+
+      expect(conversation.last[:content]).to eq("правила")
+    end
+
+    # Блок объясняет, как устроен инструмент, а без промпта модели про
+    # инструмент не сказано ничего — описывать ей окружение нечего.
+    it "не добавляет блок без системного промпта" do
+      conversation = described_class.new(system_prompt: nil, project_context: "make spec", cwd: "/срез/проект")
+
+      expect(conversation.last[:content]).not_to include("/срез/проект")
+    end
+
+    # Порядок существен: описание проекта — чужой текст, и блок про окружение
+    # должен стоять до него, а не после.
+    it "ставит каталог перед описанием проекта" do
+      conversation = described_class.new(system_prompt: "правила", project_context: "make spec", cwd: "/срез/проект")
+      content = conversation.last[:content]
+
+      expect(content.index("/срез/проект")).to be < content.index("make spec")
+    end
+  end
+
   it "сохраняет порядок сообщений" do
     conversation = described_class.new(system_prompt: "s")
     conversation.user("привет")

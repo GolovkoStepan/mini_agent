@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "securerandom"
+require "rbconfig"
 
 module MiniAgent
   # История диалога в формате OpenAI chat completions.
@@ -17,11 +18,13 @@ module MiniAgent
     # из Agent: сообщения добавляются и мимо цикла ходов — системный промпт
     # здесь же в конструкторе, а Repl по /clear заводит историю заново, и
     # логирование в Agent пришлось бы дублировать на каждом таком месте.
-    def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil, transcript: nil)
+    # cwd — каталог, в котором выполняются команды. Попадает в промпт, потому
+    # что иначе модель его выдумывает (см. Messages::ENVIRONMENT).
+    def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil, transcript: nil, cwd: nil)
       @messages = []
       @transcript = transcript
       @project_context_size = 0
-      prompt = build_prompt(system_prompt, project_context)
+      prompt = build_prompt(system_prompt, project_context, cwd)
       system(prompt) if prompt
     end
 
@@ -114,12 +117,23 @@ module MiniAgent
 
     # Контекст без промпта тоже осмыслен: --system-prompt отключён, а описание
     # проекта модели всё равно нужно.
-    def build_prompt(system_prompt, project_context)
-      return system_prompt if project_context.nil? || project_context.strip.empty?
+    def build_prompt(system_prompt, project_context, cwd)
+      prompt = system_prompt ? "#{system_prompt}#{environment(cwd)}" : system_prompt
+      return prompt if project_context.nil? || project_context.strip.empty?
 
       block = format(Messages::PROJECT_CONTEXT, content: project_context.strip)
       @project_context_size = block.length
-      "#{system_prompt}#{block}"
+      "#{prompt}#{block}"
+    end
+
+    # Без системного промпта блок не приклеивается: он часть того же
+    # объяснения, как устроен инструмент, и в одиночку описывал бы окружение
+    # агента, о котором модели ничего не сказано. Описание проекта тем и
+    # отличается — оно нужно ей независимо от того, объяснили ли ей правила.
+    def environment(cwd)
+      return "" unless cwd
+
+      format(Messages::ENVIRONMENT, cwd: cwd, os: RbConfig::CONFIG["host_os"])
     end
 
     # В историю кладётся само сообщение, а в журнал — оно же плюс расход
