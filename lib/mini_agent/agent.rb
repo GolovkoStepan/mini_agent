@@ -1,22 +1,21 @@
 # frozen_string_literal: true
 
-require "json"
-
 module MiniAgent
   # Цикл агента: запрос к модели → выполнение инструментов → повтор.
   class Agent
-    # Максимум символов результата инструмента, уходящих В МОДЕЛЬ.
-    # Ограничение защищает контекстное окно и не связано с усечением,
-    # которое UI применяет для читаемости консоли (UI::PREVIEW_LINES).
-    MAX_TOOL_OUTPUT = 10_000
-
-    def initialize(config:, client:, tools:, ui:, history: History.new, prompt: nil)
+    def initialize(config:, client:, tools:, ui:, history: History.new, prompt: nil, auto_compactor: nil)
       @config = config
       @client = client
       @tools = tools
       @ui = ui
       @history = history
       @prompt = prompt
+      @tool_runner = ToolCallRunner.new(tools: tools, ui: ui)
+      # Подменяем в тестах: иначе проверка цикла ходов требовала бы настоящего
+      # переполнения окна, то есть настоящего сервера с настоящим usage.
+      @auto_compactor = auto_compactor || AutoCompactor.new(
+        compactor: compactor, config: config, ui: ui, usage: history.usage
+      )
     end
 
     # Расход токенов за сессию. Хранится в History, а не здесь: там же
@@ -37,9 +36,7 @@ module MiniAgent
     # Живёт у агента, а не у Repl, только ради доступа к клиенту, History
     # и счётчику токенов: собирать их в Repl заново значило бы продублировать
     # половину AgentBuilder. Сама работа — в Compactor; здесь один вызов.
-    def compact(conversation)
-      Compactor.new(client: @client, history: @history, ui: @ui, usage: usage).call(conversation)
-    end
+    def compact(conversation) = compactor.call(conversation)
 
     # Описать проект в AGENTS.md (/init). Возвращает историю: команда ведёт
     # обычный диалог, и его сообщения в ней остаются.
@@ -62,28 +59,51 @@ module MiniAgent
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
     # это позволяет интерактивному режиму продолжать диалог с накопленной
     # историей, передавая её обратно через conversation:.
+    # Возвращённый объект может оказаться НЕ ТЕМ, что передали: автоматическое
+    # сворачивание заменяет историю новой посреди задачи. Вызывающий обязан
+    # брать историю из возврата, а не продолжать пользоваться своей — иначе
+    # свёрнутое молча теряется на следующей задаче.
     def run(user_message = nil, conversation: nil)
       # Сбрасывается на каждой задаче: в интерактивном режиме провал одной
       # не должен помечать всю сессию до самого выхода.
-      @failed = false
+      @outcome = :ok
       conversation ||= new_conversation
+      # Сворачивание стоит ПЕРЕД тем, как задача попадёт в историю: резюме
+      # пересказывает всё, что в ней лежит, и свежая задача превратилась бы
+      # в часть пересказа — то есть в сделанное, а не в поручение. Найдено
+      # живой проверкой: вторая задача сессии («посчитай файлы») ушла в
+      # резюме, и модель ответила, что не понимает, чего от неё хотят.
+      # Отметка отката берётся после: свернувшись, история сменила объект.
+      conversation = @auto_compactor.call(conversation)
       mark = conversation.mark
       conversation.user(user_message) if user_message
 
-      interrupted(conversation) { turns(conversation, mark) }
+      turns(conversation, mark)
     end
 
-    # Последняя задача провалилась — запрос к модели не удался. По этому
-    # признаку CLI отличает невыполненную задачу от выполненной: без него
-    # агент возвращал 0 даже когда не сделал ничего.
-    def failed?
-      @failed
-    end
+    # Чем кончилась последняя задача: :ok, :failed (запрос к модели не удался)
+    # или :unfinished (кончились ходы). По этому признаку CLI выбирает код
+    # возврата: без него агент возвращал 0 даже когда не сделал ничего.
+    attr_reader :outcome
+
+    def failed? = @outcome == :failed
 
     private
 
+    # Один на всю сессию, а не по объекту на вызов: тем же занята автоматика,
+    # и два экземпляра означали бы два разных счёта одних и тех же токенов.
+    def compactor
+      @compactor ||= Compactor.new(client: @client, history: @history, ui: @ui, usage: usage)
+    end
+
     def turns(conversation, mark)
       @config.max_turns.times do |index|
+        # Перед выставлением номера хода, а не после: Compactor гасит строку
+        # состояния в своём ensure, и поставленный раньше номер исчез бы
+        # с экрана вместе с ней. Первый ход пропускается: про него уже
+        # спросили в run, до того как задача попала в историю.
+        conversation, mark = compacted(conversation, mark) unless index.zero?
+
         # Номер хода виден только в спиннере и стирается вместе с ним:
         # в логе работы эта бухгалтерия не нужна.
         @ui.status = format(Messages::TURN, number: index + 1, total: @config.max_turns)
@@ -99,6 +119,33 @@ module MiniAgent
       end
 
       summarize(conversation, mark)
+
+    # Ctrl+C во время ожидания модели или выполнения команды прерывает задачу,
+    # но не сессию: история остаётся, и в интерактивном режиме можно
+    # продолжить. Interrupt не StandardError, поэтому rescue выше его не
+    # перехватывают и он доходит сюда.
+    #
+    # Ловится вокруг всего цикла, а не вокруг одного запроса: прервать
+    # полагается задачу целиком, иначе агент пошёл бы на следующий ход как
+    # ни в чём не бывало.
+    #
+    # Стоит именно здесь, а не в обёртке вокруг turns, куда напрашивается:
+    # обёртка возвращала бы историю, захваченную ДО сворачивания, и Ctrl+C
+    # сразу после него молча выбрасывал бы свежее резюме вместе с диалогом.
+    # Здесь conversation — та же переменная, которую цикл переприсваивает.
+    rescue Interrupt
+      @ui.warn(Messages::TASK_INTERRUPTED)
+      conversation
+    end
+
+    # Свернуть диалог, если окно кончается. Отметка отката берётся заново:
+    # прежняя указывает в историю, которой больше нет, и rollback по ней
+    # молча ничего бы не снял (число снятого вышло бы отрицательным).
+    def compacted(conversation, mark)
+      fresh = @auto_compactor.call(conversation)
+      return [conversation, mark] if fresh.equal?(conversation)
+
+      [fresh, fresh.mark]
     end
 
     def run_tools(conversation, content, tool_calls, usage, finish_reason)
@@ -108,7 +155,7 @@ module MiniAgent
       @ui.warn(format(Messages::TRUNCATED_TOOL_CALL, limit: @config.max_tokens)) if truncated?(finish_reason)
 
       conversation.assistant(content, tool_calls: tool_calls, usage: usage)
-      tool_calls.each { |tool_call| handle_tool_call(conversation, tool_call) }
+      tool_calls.each { |tool_call| @tool_runner.call(conversation, tool_call) }
     end
 
     # Учёт токенов стоит здесь, а не в цикле ходов: через этот метод проходят
@@ -121,7 +168,7 @@ module MiniAgent
       @history.usage.add(usage)
       [content, tool_calls, usage, finish_reason]
     rescue StandardError => e
-      @failed = true
+      @outcome = :failed
       @ui.error(format(Messages::LLM_CONNECTION_FAILED, message: e.message))
       nil
     end
@@ -133,21 +180,6 @@ module MiniAgent
     # до /clear: проверено живьём, следующий вопрос до модели уже не доходил.
     def recover(conversation, mark)
       @ui.warn(Messages::TURN_ROLLED_BACK) if conversation.rollback(mark).positive?
-      conversation
-    end
-
-    # Ctrl+C во время ожидания модели или выполнения команды прерывает задачу,
-    # но не сессию: история остаётся, и в интерактивном режиме можно
-    # продолжить. Interrupt не StandardError, поэтому rescue выше его не
-    # перехватывают и он доходит сюда.
-    #
-    # Ловится вокруг всего цикла, а не вокруг одного запроса: прервать
-    # полагается задачу целиком, иначе агент пошёл бы на следующий ход как
-    # ни в чём не бывало.
-    def interrupted(conversation)
-      yield
-    rescue Interrupt
-      @ui.warn(Messages::TASK_INTERRUPTED)
       conversation
     end
 
@@ -180,7 +212,7 @@ module MiniAgent
         return
       end
 
-      @failed = true
+      @outcome = :failed
       @ui.error(format(Messages::TRUNCATED_EMPTY, limit: @config.max_tokens))
       @ui.puts(truncated_hint)
     end
@@ -198,44 +230,6 @@ module MiniAgent
 
     def truncated?(finish_reason) = finish_reason == ChatResponse::TRUNCATED
 
-    def handle_tool_call(conversation, tool_call)
-      function = tool_call["function"] || {}
-      name = function["name"].to_s
-      tool_call_id = Conversation.tool_call_id(tool_call)
-
-      arguments = parse_arguments(function["arguments"])
-      unless arguments
-        conversation.tool(tool_call_id, @last_parse_error)
-        return
-      end
-
-      @ui.tool_call(name, arguments)
-      result = @tools.dispatch(name, arguments)
-      @ui.tool_result(result)
-
-      conversation.tool(tool_call_id, truncate(result))
-    end
-
-    # Битый JSON в аргументах — не повод ронять цикл: сообщаем об этом
-    # модели, и она может исправиться на следующем ходу.
-    def parse_arguments(raw)
-      parsed = JSON.parse(raw.to_s.empty? ? "{}" : raw)
-      return parsed if parsed.is_a?(Hash)
-
-      @last_parse_error = format(Messages::ARGS_PARSE_ERROR, message: "ожидался объект", raw: raw.to_s[0, 200])
-      nil
-    rescue JSON::ParserError => e
-      @last_parse_error = format(Messages::ARGS_PARSE_ERROR, message: e.message, raw: raw.to_s[0, 200])
-      @ui.error(@last_parse_error)
-      nil
-    end
-
-    def truncate(text)
-      return text if text.length <= MAX_TOOL_OUTPUT
-
-      text[0, MAX_TOOL_OUTPUT] + Messages::TRUNCATED_SUFFIX
-    end
-
     # Достигнут лимит ходов: просим модель подвести итог.
     # tool_choice: "none" — иначе она вернёт очередной вызов инструмента,
     # выполнять который уже негде, и он потеряется молча.
@@ -244,6 +238,12 @@ module MiniAgent
     # (Qwen и другие) требуют, чтобы system-сообщение было только первым,
     # и отвечают HTTP 400 на system в середине истории.
     def summarize(conversation, mark)
+      # Ходы кончились — задача не доделана, чем бы ни кончился итоговый
+      # запрос. Раньше признака здесь не было вовсе, и агент возвращал 0:
+      # модель по просьбе подводила итог, отчёт выглядел как «готово»,
+      # а сделана задача была наполовину. Ставится ДО запроса, чтобы
+      # неудача последнего перебила это на :failed.
+      @outcome = :unfinished
       @ui.warn(format(Messages::MAX_TURNS_REACHED, count: @config.max_turns))
       conversation.user(Messages::STOP_MAX_TURNS)
 

@@ -15,6 +15,17 @@ module MiniAgent
     # (например, HTTP 400 по переполненному контексту). Без этого кода агент
     # возвращал 0, ничего не выполнив, и скрипт-обёртка считал задачу успешной.
     EXIT_LLM = 3
+    # Ходы кончились раньше задачи. Отдельно от EXIT_LLM: там запрос не удался
+    # и делать было нечего, здесь всё работало исправно — просто не хватило
+    # отведённых ходов, и лечение другое (--max-turns, а не сеть и не модель).
+    # Обёртке разница нужна: первое стоит повторить, второе бессмысленно
+    # повторять с теми же настройками.
+    EXIT_UNFINISHED = 4
+
+    # Исход задачи → код возврата. :ok в таблице нет намеренно: fetch с
+    # умолчанием отвечает EXIT_OK и на него, и на любой исход, о котором
+    # здесь ещё не знают, — новый признак у агента не должен ронять CLI.
+    EXIT_CODES = { failed: EXIT_LLM, unfinished: EXIT_UNFINISHED }.freeze
 
     # Ошибки открытия соединения: сервер не отвечает, не запущен, недоступен.
     # Ловятся отдельно от ошибок самих запросов (те обрабатывает Agent#request),
@@ -37,6 +48,7 @@ module MiniAgent
       [:base_url, "--base-url URL", Messages::OPT_BASE_URL],
       [:model, "--model NAME", Messages::OPT_MODEL],
       [:stream, "--[no-]stream", Messages::OPT_STREAM],
+      [:auto_compact, "--[no-]auto-compact", Messages::OPT_AUTO_COMPACT],
       [:policy, "--policy NAME", Messages::OPT_POLICY],
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
       [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
@@ -92,7 +104,7 @@ module MiniAgent
 
       with_connection(config, ui) do |agent|
         agent.run(task)
-        agent.failed? ? EXIT_LLM : EXIT_OK
+        EXIT_CODES.fetch(agent.outcome, EXIT_OK)
       end
     end
 

@@ -42,6 +42,12 @@ module MiniAgent
       # всё это время — худшее, что можно показать. Выключается --no-stream,
       # если сервер потока не умеет.
       stream: true,
+      # Сворачивать диалог самостоятельно, когда окно кончается. Включено
+      # по умолчанию: без этого длинная задача упирается в окно и обрывается
+      # там, где агент как раз работает, — а лечение (/compact) доступно
+      # только в интерактивном режиме и только человеку, который в этот
+      # момент смотрит на экран.
+      auto_compact: true,
       timeout: 120,
       # Ожидание ответа модели. 120 секунд не хватало: на bonsai-27b (Q1_0,
       # рассуждающая) «17*23» заняло 347 секунд, а вопрос на три абзаца —
@@ -101,6 +107,7 @@ module MiniAgent
       policy: "AGENT_POLICY",
       allow_unsafe: "ALLOW_UNSAFE",
       stream: "LLM_STREAM",
+      auto_compact: "AUTO_COMPACT",
       timeout: "COMMAND_TIMEOUT",
       cwd: "AGENT_CWD",
       log: "AGENT_LOG"
@@ -174,6 +181,12 @@ module MiniAgent
     def stream?
       @stream
     end
+
+    # Сворачивать диалог самостоятельно при нехватке окна.
+    #
+    # Вычисляется на месте, а не хранится полем: спрашивают его один раз
+    # за ход, а конструктор Config и без того длиннее, чем хотелось бы.
+    def auto_compact? = to_bool(fetch(:auto_compact))
 
     def chat_uri
       URI.parse("#{@base_url}/chat/completions")

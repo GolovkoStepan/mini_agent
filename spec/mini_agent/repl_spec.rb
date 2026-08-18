@@ -39,6 +39,27 @@ RSpec.describe MiniAgent::Repl do
       expect(client).to have_received(:chat).once
     end
 
+    # Историю подменяют не только команды: обычная задача тоже отдаёт новую,
+    # если по ходу сработало автоматическое сворачивание. Прежде здесь стояло
+    # `@agent.run(...); conversation`, и свёрнутое терялось на следующей же
+    # задаче — молча, потому что работа продолжалась как ни в чём не бывало.
+    it "продолжает работу со свёрнутой историей, а не с прежней" do
+      folded = MiniAgent::History.new.build.tap { |c| c.user("Резюме диалога.") }
+      auto = instance_double(MiniAgent::AutoCompactor)
+      allow(auto).to receive(:call).and_return(folded)
+      allow(client).to receive(:chat).and_return(["ответ", []])
+      agent = MiniAgent::Agent.new(
+        config: config, client: client, tools: tools, ui: ui, auto_compactor: auto
+      )
+      reader = MiniAgent::LineReader.new(input: StringIO.new("задача\nexit\n"), output: out)
+
+      conversation = described_class.new(
+        agent: agent, config: config, tools: tools, ui: ui, reader: reader
+      ).run
+
+      expect(conversation).to be(folded)
+    end
+
     # Ctrl+D закрывает поток ввода.
     it "выходит при обрыве ввода" do
       allow(client).to receive(:chat)

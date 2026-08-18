@@ -61,6 +61,7 @@ module MiniAgent
     def max_tokens: () -> Integer
     def allow_unsafe?: () -> bool
     def stream?: () -> bool
+    def auto_compact?: () -> bool
     def chat_uri: () -> URI::Generic
     def models_uri: () -> URI::Generic
     def cwd: () -> String?
@@ -174,6 +175,13 @@ module MiniAgent
 
   class Compactor
     def initialize: (client: LLMClient, history: History, ui: UI, ?usage: Usage?) -> void
+    def call: (Conversation conversation) -> Conversation
+  end
+
+  class AutoCompactor
+    MIN_GAIN: Float
+
+    def initialize: (compactor: Compactor, config: Config, ui: UI, ?usage: Usage?) -> void
     def call: (Conversation conversation) -> Conversation
   end
 
@@ -369,10 +377,19 @@ module MiniAgent
     def models: () -> Array[String]
   end
 
-  class Agent
+  class ToolCallRunner
     MAX_TOOL_OUTPUT: Integer
 
-    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History, ?prompt: Prompt?) -> void
+    def initialize: (tools: ToolRegistry, ui: UI) -> void
+    def call: (Conversation conversation, tool_call tool_call) -> void
+  end
+
+  class Agent
+    type outcome = :ok | :failed | :unfinished
+
+    attr_reader outcome: outcome
+
+    def initialize: (config: Config, client: LLMClient, tools: ToolRegistry, ui: UI, ?history: History, ?prompt: Prompt?, ?auto_compactor: AutoCompactor?) -> void
     def new_conversation: () -> Conversation
     def compact: (Conversation conversation) -> Conversation
     def init: (Conversation conversation) -> Conversation
@@ -420,6 +437,8 @@ module MiniAgent
     EXIT_USAGE: Integer
     EXIT_CONNECT: Integer
     EXIT_LLM: Integer
+    EXIT_UNFINISHED: Integer
+    EXIT_CODES: Hash[Symbol, Integer]
     FLAGS: Array[Array[untyped]]
     CONNECT_ERRORS: Array[Class]
 

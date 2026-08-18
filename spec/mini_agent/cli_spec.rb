@@ -252,6 +252,40 @@ RSpec.describe MiniAgent::CLI do
       end
     end
 
+    # Ходы кончились раньше задачи. Всё работало исправно, но сделана она
+    # наполовину: агент возвращал 0 и обёртка считала её успешной.
+    describe "исчерпанные ходы" do
+      before do
+        body = {
+          "choices" => [{
+            "message" => {
+              "content" => "работаю",
+              "tool_calls" => [{ "id" => "c1", "type" => "function",
+                                 "function" => { "name" => "bash",
+                                                 "arguments" => { "command" => "echo привет" }.to_json } }]
+            },
+            "finish_reason" => "tool_calls"
+          }]
+        }
+        stub_request(:post, endpoint).to_return(
+          status: 200, body: body.to_json, headers: { "Content-Type" => "application/json" }
+        )
+      end
+
+      it "возвращает код 4" do
+        code = start(["--base-url", "http://cli.test/v1", "--no-stream", "--max-turns", "1", "задача"])
+
+        expect(code).to eq(4)
+        expect(out.string).to include("задача может быть не доделана")
+      end
+
+      # Лечение разное: там сеть или модель, здесь --max-turns. Слив кодов
+      # означал бы, что обёртка одинаково реагирует на два разных сбоя.
+      it "не путается с кодом провалившегося запроса" do
+        expect(MiniAgent::CLI::EXIT_UNFINISHED).not_to eq(MiniAgent::CLI::EXIT_LLM)
+      end
+    end
+
     describe "контекст проекта" do
       it "подмешивает описание проекта в системный промпт" do
         allow(MiniAgent::ProjectContext).to receive(:new).and_return(

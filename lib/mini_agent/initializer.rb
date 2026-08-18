@@ -20,12 +20,17 @@ module MiniAgent
 
     # Возвращает историю: команда ведёт обычный диалог, и его сообщения
     # остаются в ней, как после любой задачи.
+    #
+    # Именно ту, что вернул run, а не ту, что передали: изучение проекта —
+    # длинная задача с чтением файлов, и окно на ней кончается чаще всего.
+    # Автоматическое сворачивание заменяет историю новой, и прежняя после
+    # этого — уже не история сессии.
     def call(conversation)
       return conversation unless confirm_overwrite?
 
-      @agent.run(format(Messages::INIT_REQUEST, filename: target_name), conversation: conversation)
+      result = @agent.run(format(Messages::INIT_REQUEST, filename: target_name), conversation: conversation)
       report
-      conversation
+      result
     end
 
     private

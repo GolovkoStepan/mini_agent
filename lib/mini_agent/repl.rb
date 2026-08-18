@@ -73,6 +73,12 @@ module MiniAgent
     # итерацию цикла. Вернуть conversation вместо результата — значит
     # продолжить работу со старой историей, ничего при этом не сломав
     # заметно.
+    #
+    # По той же причине берётся и результат run: обычная задача историю
+    # тоже подменяет, если по ходу дела сработало автоматическое
+    # сворачивание. Прежде здесь стояло `@agent.run(...); conversation`,
+    # и это было безобидно ровно до тех пор, пока новую историю заводили
+    # только команды.
     def handle(task, conversation)
       case @commands.call(task, conversation: conversation)
       when :exit then :exit
@@ -80,9 +86,7 @@ module MiniAgent
       when :clear then clear
       when :compact then @agent.compact(conversation)
       when :init then @agent.init(conversation)
-      else
-        @agent.run(task, conversation: conversation)
-        conversation
+      else @agent.run(task, conversation: conversation)
       end
     end
 

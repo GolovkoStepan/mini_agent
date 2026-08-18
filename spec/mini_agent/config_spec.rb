@@ -84,6 +84,29 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  describe "#auto_compact?" do
+    # Включено по умолчанию: без этого длинная задача упирается в окно и
+    # обрывается там, где агент как раз работает, а /compact доступен только
+    # человеку и только в интерактивном режиме.
+    it "по умолчанию включено" do
+      expect(described_class.new({}, env: {}).auto_compact?).to be(true)
+    end
+
+    it "выключается флагом --no-auto-compact" do
+      expect(described_class.new({ auto_compact: false }, env: {}).auto_compact?).to be(false)
+    end
+
+    it "выключается через AUTO_COMPACT=false" do
+      expect(described_class.new({}, env: { "AUTO_COMPACT" => "false" }).auto_compact?).to be(false)
+    end
+
+    it "позволяет флагу перебить AUTO_COMPACT" do
+      config = described_class.new({ auto_compact: true }, env: { "AUTO_COMPACT" => "false" })
+
+      expect(config.auto_compact?).to be(true)
+    end
+  end
+
   describe "#policy" do
     it "по умолчанию deny" do
       expect(described_class.new({}, env: {}).policy).to eq(:deny)

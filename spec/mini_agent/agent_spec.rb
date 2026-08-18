@@ -208,7 +208,7 @@ RSpec.describe MiniAgent::Agent do
       tool_message = conversation.to_a.find { |m| m[:role] == "tool" }
 
       expect(tool_message[:content].length)
-        .to eq(described_class::MAX_TOOL_OUTPUT + MiniAgent::Messages::TRUNCATED_SUFFIX.length)
+        .to eq(MiniAgent::ToolCallRunner::MAX_TOOL_OUTPUT + MiniAgent::Messages::TRUNCATED_SUFFIX.length)
       expect(tool_message[:content]).to end_with("(truncated)")
     end
 
@@ -255,6 +255,108 @@ RSpec.describe MiniAgent::Agent do
       agent.run("задача")
 
       expect(client).to have_received(:chat).with(anything, hash_including(tool_choice: "none")).once
+    end
+
+    # Итоговый ответ модели выглядит как обычное завершение работы, и без
+    # этого признака CLI возвращал 0: задача сделана наполовину, а обёртка
+    # считала её успешной.
+    it "помечает задачу недоделанной" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+
+      agent.run("задача")
+
+      expect(agent.outcome).to eq(:unfinished)
+      expect(agent).not_to be_failed, "ходы кончились — это не сбой запроса"
+    end
+
+    # Ставится ДО суммирующего запроса именно ради этого случая: сбой
+    # последнего запроса важнее исчерпанных ходов, лечение у них разное.
+    it "провал итогового запроса перебивает недоделанность" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call]])
+      allow(client).to receive(:chat).with(anything, hash_including(tool_choice: "none"))
+                                     .and_raise(MiniAgent::LLMError, "сервер лёг")
+
+      agent.run("задача")
+
+      expect(agent.outcome).to eq(:failed)
+    end
+  end
+
+  # Сворачивание заменяет объект истории посреди задачи, и это ломается
+  # тремя разными способами. Все три проверяются здесь.
+  describe "автоматическое сворачивание" do
+    let(:folded) { MiniAgent::History.new.build.tap { |c| c.user("Резюме диалога.") } }
+    let(:auto) { instance_double(MiniAgent::AutoCompactor) }
+
+    subject(:agent) do
+      described_class.new(config: config, client: client, tools: tools, ui: ui, auto_compactor: auto)
+    end
+
+    before { allow(auto).to receive(:call) { |given| given } }
+
+    # Один раз перед задачей и по разу перед каждым следующим ходом: про
+    # первый ход спрошено ещё до того, как задача попала в историю.
+    it "спрашивает автоматику перед задачей и перед каждым следующим ходом" do
+      allow(client).to receive(:chat).and_return(["", [tool_call]], ["готово", []])
+
+      agent.run("задача")
+
+      expect(auto).to have_received(:call).twice
+    end
+
+    # Резюме пересказывает всё, что лежит в истории. Свернув её вместе со
+    # свежей задачей, агент превращает поручение в часть пересказа —
+    # в сделанное. Найдено живой проверкой: вторая задача сессии ушла
+    # в резюме, и модель ответила, что не понимает, чего от неё хотят.
+    it "сворачивает до того, как задача попала в историю" do
+      seen = []
+      allow(auto).to receive(:call) { |given| seen << given.to_a.map { |m| m[:content] }.join and given }
+      allow(client).to receive(:chat).and_return(["готово", []])
+
+      agent.run("посчитай файлы")
+
+      expect(seen.first).not_to include("посчитай файлы")
+    end
+
+    # Сворачивание идёт до запроса, а не после неудачного: после упора в окно
+    # запрос резюме уже не проходит — историю для него надо отправить целиком.
+    it "сворачивает до запроса к модели, а не после" do
+      order = []
+      allow(auto).to receive(:call) { |given| order << :compact and given }
+      allow(client).to receive(:chat) { order << :chat and ["готово", []] }
+
+      agent.run("задача")
+
+      expect(order).to eq(%i[compact chat])
+    end
+
+    it "отдаёт наружу свёрнутую историю, а не ту, что передали" do
+      allow(auto).to receive(:call).and_return(folded)
+      allow(client).to receive(:chat).and_return(["готово", []])
+
+      expect(agent.run("задача")).to be(folded)
+    end
+
+    # Ловушка: rescue Interrupt вокруг цикла возвращал бы историю, захваченную
+    # ДО сворачивания, и свежее резюме молча пропадало бы вместе с диалогом.
+    it "не теряет свёрнутое при Ctrl+C" do
+      allow(auto).to receive(:call).and_return(folded)
+      allow(client).to receive(:chat).and_raise(Interrupt)
+
+      expect(agent.run("задача")).to be(folded)
+      expect(out.string).to include("Прервано")
+    end
+
+    # Ловушка: отметка отката указывала бы в историю, которой больше нет,
+    # и rollback молча не снял бы ничего (число снятого вышло бы отрицательным).
+    it "откатывает неудачный ход по новой истории, а не по исчезнувшей" do
+      allow(auto).to receive(:call).and_return(folded)
+      allow(client).to receive(:chat).and_raise(MiniAgent::LLMError, "сервер лёг")
+
+      result = agent.run("задача")
+
+      expect(result).to be(folded)
+      expect(result.to_a.map { |m| m[:role] }).to eq(%w[system user]), "резюме на месте, мусора нет"
     end
   end
 

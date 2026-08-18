@@ -16,7 +16,7 @@ module MiniAgent
   class UI
     # Сколько строк вывода инструмента показывать пользователю.
     # Это ограничение ТОЛЬКО для читаемости консоли; лимит того, что уходит
-    # в модель, живёт отдельно в Agent::MAX_TOOL_OUTPUT.
+    # в модель, живёт отдельно в ToolCallRunner::MAX_TOOL_OUTPUT.
     PREVIEW_LINES = 5
     PREVIEW_CHARS = 500
 
