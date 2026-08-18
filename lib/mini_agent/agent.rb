@@ -61,7 +61,7 @@ module MiniAgent
     # не просили.
     def init(conversation)
       result = Initializer.new(agent: self, config: @config, ui: @ui, prompt: @prompt).call(conversation)
-      @history.project_context = ProjectContext.load(@config.cwd || Dir.pwd)
+      @history.project_context = ProjectContext.load(@config.cwd || Dir.pwd, window: @config.context_window)
       result
     end
 

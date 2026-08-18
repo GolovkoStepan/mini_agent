@@ -138,7 +138,7 @@ module MiniAgent
     end
 
     def greet
-      @ui.assistant(Messages::INTERACTIVE_HEADER)
+      @ui.assistant(format(Messages::INTERACTIVE_HEADER, version: MiniAgent::VERSION))
       @ui.puts(Messages::INTERACTIVE_HINT)
     end
   end

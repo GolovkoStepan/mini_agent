@@ -58,6 +58,17 @@ RSpec.describe MiniAgent::Transcript do
       expect(records.first["base_url"]).to eq("http://example:1234/v1")
     end
 
+    # Журнал переживает сессию и разбирается спустя недели, а поведение агента
+    # между версиями меняется: без этого поля по старому логу не сказать, по
+    # какому расчёту в нём выведен max_tokens.
+    it "пишет версию агента" do
+      log = described_class.new(path)
+      log.session(MiniAgent::Config.new({}, env: {}))
+      log.close
+
+      expect(records.first["version"]).to eq(MiniAgent::VERSION)
+    end
+
     # Лог заводят, чтобы показать его кому-то ещё; ключ в нём — утечка,
     # которую никто не заметит.
     it "не пишет api_key" do

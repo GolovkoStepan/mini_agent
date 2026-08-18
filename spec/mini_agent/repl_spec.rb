@@ -23,6 +23,16 @@ RSpec.describe MiniAgent::Repl do
       expect(out.string).to include("До свидания!")
     end
 
+    # Версия печатается в приветствии, потому что в интерактивном режиме
+    # проводится всё время, а --version там уже не набрать.
+    it "называет версию в приветствии" do
+      allow(client).to receive(:chat).and_return(["ответ", []])
+
+      repl("exit\n").run
+
+      expect(out.string).to include("Mini Agent v#{MiniAgent::VERSION} (интерактивный режим)")
+    end
+
     it "накапливает историю между задачами" do
       allow(client).to receive(:chat).and_return(["раз", []], ["два", []])
 

@@ -166,7 +166,7 @@ module MiniAgent
     end
 
     def usage(parser)
-      @out.puts(format(Messages::NO_TASK_HEADER, version: MiniAgent::VERSION))
+      @out.puts(format(Messages::HEADER, version: MiniAgent::VERSION))
       @out.puts(Messages::NO_TASK_HINT)
       @out.puts(Messages::NO_TASK_HINT2)
       @out.puts(parser)

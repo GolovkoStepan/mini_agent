@@ -79,12 +79,19 @@ module MiniAgent
 
   class ProjectContext
     FILENAMES: Array[String]
-    MAX_SIZE: Integer
+    MAX_CHARS: Integer
+    SHARE: Float
+    CHARS_PER_TOKEN: Float
 
-    def self.load: (?String dir) -> String?
-    def initialize: (?String dir) -> void
+    attr_reader kept: Integer?
+    attr_reader total: Integer?
+
+    def self.load: (?String dir, ?window: Integer?) -> String?
+    def initialize: (?String dir, ?window: Integer?) -> void
     def load: () -> String?
     def filename: () -> String?
+    def truncated?: () -> bool
+    def limited_by: () -> Symbol
   end
 
   class Usage

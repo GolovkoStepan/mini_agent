@@ -289,7 +289,8 @@ RSpec.describe MiniAgent::CLI do
     describe "контекст проекта" do
       it "подмешивает описание проекта в системный промпт" do
         allow(MiniAgent::ProjectContext).to receive(:new).and_return(
-          instance_double(MiniAgent::ProjectContext, load: "Тесты: make spec", filename: "AGENTS.md")
+          instance_double(MiniAgent::ProjectContext, load: "Тесты: make spec", filename: "AGENTS.md",
+                                                     truncated?: false)
         )
 
         start(["--base-url", "http://cli.test/v1", "задача"])
@@ -302,12 +303,46 @@ RSpec.describe MiniAgent::CLI do
       # Молчаливое изменение поведения агента хуже лишней строки в выводе.
       it "сообщает, что контекст подхвачен" do
         allow(MiniAgent::ProjectContext).to receive(:new).and_return(
-          instance_double(MiniAgent::ProjectContext, load: "описание", filename: "AGENTS.md")
+          instance_double(MiniAgent::ProjectContext, load: "описание", filename: "AGENTS.md",
+                                                     truncated?: false)
         )
 
         start(["--base-url", "http://cli.test/v1", "задача"])
 
         expect(out.string).to include("Контекст проекта: AGENTS.md")
+      end
+
+      # Урезанное описание — потеря знаний о проекте, которую по поведению
+      # агента не увидеть: он просто не упомянет того, чего не читал.
+      # Лечение неочевидно и потому названо в той же строке.
+      it "предупреждает, что описание не влезло в окно" do
+        allow(MiniAgent::ProjectContext).to receive(:new).and_return(
+          instance_double(MiniAgent::ProjectContext, load: "описание", filename: "AGENTS.md",
+                                                     truncated?: true, kept: 5120, total: 80_000,
+                                                     limited_by: :window)
+        )
+
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(out.string).to include("урезано до 5120 из 80000 знаков")
+        expect(out.string).to include("бо́льшим окном")
+      end
+
+      # Причин обрезки две, и лечения у них противоположны по адресу: там
+      # сервер, здесь файл. Живая проверка при окне 60416 показала, как одно
+      # сообщение на оба случая посылает чинить сервер вместо файла.
+      it "не винит окно, когда описание урезал потолок" do
+        allow(MiniAgent::ProjectContext).to receive(:new).and_return(
+          instance_double(MiniAgent::ProjectContext, load: "описание", filename: "AGENTS.md",
+                                                     truncated?: true, kept: 19_936, total: 89_600,
+                                                     limited_by: :ceiling)
+        )
+
+        start(["--base-url", "http://cli.test/v1", "задача"])
+
+        expect(out.string).to include("урезано до 19936 из 89600 знаков")
+        expect(out.string).to include("Помогает только правка файла")
+        expect(out.string).not_to include("бо́льшим окном")
       end
 
       it "молчит, когда описания нет" do

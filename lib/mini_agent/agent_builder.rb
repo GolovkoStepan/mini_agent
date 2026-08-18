@@ -90,12 +90,29 @@ module MiniAgent
     # Описание ищется в рабочем каталоге агента, а не в том, откуда его
     # запустили: с --cwd это разные места, и читать описание одного проекта,
     # работая в другом, — худшее из возможных поведений.
+    #
+    # Размер окна к этому времени уже спрошен у сервера (detect_window выше
+    # по коду call) — порядок обязателен: описание, урезанное по одному лишь
+    # потолку в знаках, всё ещё способно не влезть в маленькое окно.
     def project_context
-      loader = ProjectContext.new(@config.cwd || Dir.pwd)
+      loader = ProjectContext.new(@config.cwd || Dir.pwd, window: @config.context_window)
       content = loader.load
-      @ui.puts(format(Messages::CONTEXT_LOADED, name: loader.filename)) if content
+      return content unless content
 
+      @ui.puts(format(Messages::CONTEXT_LOADED, name: loader.filename))
+      warn_truncated(loader)
       content
+    end
+
+    # Урезанное описание — это молчаливая потеря знаний о проекте: агент
+    # просто не упомянет того, чего не читал, и понять это по его поведению
+    # нельзя. Лечение называется тут же, потому что оно неочевидно, и берётся
+    # по причине обрезки: окно и потолок лечатся по-разному (см. Messages).
+    def warn_truncated(loader)
+      return unless loader.truncated?
+
+      text = loader.limited_by == :window ? Messages::CONTEXT_CUT_WINDOW : Messages::CONTEXT_CUT_CEILING
+      @ui.warn(format(text, kept: loader.kept, total: Plural.with(loader.total, *Messages::CHARS)))
     end
 
     def build_tools
