@@ -531,4 +531,45 @@ RSpec.describe MiniAgent::UI do
       expect(out.string).to include("**важным**")
     end
   end
+
+  # Управляющая последовательность в ответе модели способна подделать
+  # сообщения самого агента: перекрасить их, стереть строку, нарисовать
+  # «Продолжить выполнение?» поверх чужого текста. Граница проходит
+  # по источнику — текст модели против вывода машины.
+  describe "управляющие последовательности" do
+    it "экранирует их в ответе модели" do
+      ui.assistant("обычный текст\e[31m")
+
+      expect(out.string).to include("обычный текст^[[31m")
+      expect(out.string).not_to include("\e[31m")
+    end
+
+    it "экранирует их и в потоке" do
+      streaming = described_class.new(out: out, tty: true, spinner_interval: 0.01, width: 40)
+      streaming.stream_chunk("ответ\e[2K\n")
+      streaming.stream_finish
+
+      expect(out.string).to include("ответ^[[2K")
+      expect(out.string).not_to include("\e[2K")
+    end
+
+    # Хвост размышлений — тоже текст модели, и в спиннер он идёт мимо разметки.
+    it "экранирует их в бегущей строке" do
+      spinning = described_class.new(out: out, tty: true, spinner_interval: 0.01, width: 80)
+      spinning.ticker = "думаю\e[1;5;41m"
+      spinning.with_spinner { sleep 0.05 }
+
+      expect(out.string).to include("думаю^[[1;5;41m")
+      expect(out.string).not_to include("\e[1;5;41m")
+    end
+
+    # Вывод команд — данные от машины, и ANSI в них законен: `ls --color`
+    # и `git diff` печатают цвета сами. Подчистив их, агент испортил бы то,
+    # ради чего команду и запускали.
+    it "не трогает вывод команды" do
+      ui.tool_result("Код выхода: 0\n\e[32mзелёное\e[0m")
+
+      expect(out.string).to include("\e[32mзелёное\e[0m")
+    end
+  end
 end
