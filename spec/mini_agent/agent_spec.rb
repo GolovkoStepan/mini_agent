@@ -534,6 +534,54 @@ RSpec.describe MiniAgent::Agent do
       expect { agent.run("задача") }.not_to raise_error
       expect(out.string).to include("Прервано")
     end
+
+    # Дыра в истории: assistant объявляет два вызова, а ответ есть только
+    # у первого — следующий запрос с такой историей сервер отвергает.
+    # В разовом запуске безвредно, в интерактивном режиме история остаётся
+    # и уходит со следующей задачей.
+    it "отвечает на вызовы, до которых не дошла очередь" do
+      slow = Class.new do
+        def name = "echo"
+        def schema = {}
+        # Первый файл прочитан, на втором человек нажал Ctrl+C.
+        def call(arguments) = arguments["text"] == "второй" ? raise(Interrupt) : "готово"
+      end.new
+      calls = %w[первый второй третий].each_with_index.map do |text, index|
+        { "id" => "c#{index}", "function" => { "name" => "echo", "arguments" => { "text" => text }.to_json } }
+      end
+      allow(client).to receive(:chat).and_return(["читаю", calls])
+
+      agent = described_class.new(
+        config: config, client: client, tools: MiniAgent::ToolRegistry.new([slow]), ui: ui
+      )
+      messages = agent.run("задача").to_a
+
+      expect(messages.select { |m| m[:role] == "tool" }.map { |m| m[:tool_call_id] }).to eq(%w[c0 c1 c2])
+    end
+
+    # Прерванная команда была запущена и убита на полпути, остальные не
+    # начинались вовсе. Сказать про первую «ничего не изменилось» значило бы
+    # соврать поверх, возможно, испорченного файла.
+    it "различает прерванный вызов и тот, что не запускался" do
+      angry = Class.new do
+        def name = "angry"
+        def schema = {}
+        def call(_arguments) = raise(Interrupt)
+      end.new
+      calls = [
+        { "id" => "c1", "function" => { "name" => "angry", "arguments" => "{}" } },
+        { "id" => "c2", "function" => { "name" => "angry", "arguments" => %({"x":1}) } }
+      ]
+      allow(client).to receive(:chat).and_return(["сейчас", calls])
+
+      agent = described_class.new(
+        config: config, client: client, tools: MiniAgent::ToolRegistry.new([angry]), ui: ui
+      )
+      answers = agent.run("задача").to_a.select { |m| m[:role] == "tool" }.map { |m| m[:content] }
+
+      expect(answers.first).to include("остановлена на полпути")
+      expect(answers.last).to include("НЕ выполнялась")
+    end
   end
 
   describe "ошибки связи" do

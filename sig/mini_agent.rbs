@@ -533,6 +533,7 @@ module MiniAgent
     def initialize: (tools: ToolRegistry, ui: UI, ?config: Config?) -> void
     def reset: () -> void
     def call: (Conversation conversation, tool_call tool_call) -> status
+    def call_all: (Conversation conversation, Array[tool_call] tool_calls) -> status
   end
 
   class Agent

@@ -208,12 +208,10 @@ module MiniAgent
       @ui.warn(format(Messages::TRUNCATED_TOOL_CALL, limit: @config.max_tokens)) if truncated?(finish_reason)
 
       conversation.assistant(content, tool_calls: tool_calls, usage: usage)
-      # Обход не прерывается на первом же :loop: модель ждёт ответа на каждый
-      # tool_call_id, и брошенный без ответа вызов оставил бы в истории дыру,
-      # от которой валится следующий запрос — ровно то, ради чего заведён
-      # rollback. Обрыв откладывается до конца обхода.
-      statuses = tool_calls.map { |tool_call| @tool_runner.call(conversation, tool_call) }
-      statuses.include?(:loop) ? :loop : :ok
+      # Обход вызовов целиком у ToolCallRunner: там же держится обещание,
+      # что на каждый tool_call_id придёт ответ, — а оно и решает, когда
+      # обход можно оборвать, а когда нет.
+      @tool_runner.call_all(conversation, tool_calls)
     end
 
     # Модель третий раз подряд просит одно и то же. Ходы не кончились, но и
