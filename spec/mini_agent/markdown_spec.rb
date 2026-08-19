@@ -73,6 +73,76 @@ RSpec.describe MiniAgent::Markdown do
     end
   end
 
+  describe "таблицы" do
+    let(:simple) { "| Файл | Тест |\n|---|---|\n| card.rb | есть |\n| user.rb | нет |" }
+
+    it "выравнивает колонки по самой длинной ячейке" do
+      expect(render(simple).lines.map(&:chomp)).to eq(
+        ["<bold>Файл</>     <bold>Тест</>", "  ─────────────", "  card.rb  есть", "  user.rb  нет"]
+      )
+    end
+
+    # Строка разделителя — служебная: она объясняет разбор, а не содержимое.
+    it "не печатает строку разделителя" do
+      expect(render(simple)).not_to include("---")
+    end
+
+    # Двоеточия в разделителе — единственное, чем модель может сказать «это
+    # числа». Игнорировать их значит соврать про содержимое.
+    it "двигает текст по двоеточиям в разделителе" do
+      table = "| Имя | Счёт |\n|:---|---:|\n| a | 1000 |"
+
+      expect(render(table).lines.last.chomp).to eq("  a    1000")
+    end
+
+    it "размечает содержимое ячейки" do
+      table = "| Файл | Что |\n|---|---|\n| `agent.rb` | **цикл** ходов |"
+
+      expect(render(table).lines.last.chomp).to eq("  <gray>agent.rb</>  <bold>цикл</> ходов")
+    end
+
+    # Рваные строки у модели — дело обычное, и разъехавшаяся таблица хуже
+    # добитой пустой ячейки. Число колонок задаёт заголовок, как в GFM.
+    it "добивает короткую строку и режет длинную" do
+      table = "| a | b | c |\n|---|---|---|\n| один |\n| 1 | 2 | 3 | 4 |"
+
+      expect(render(table).lines.map(&:chomp).last(2)).to eq(["  один", "  1     2  3"])
+    end
+
+    # Пока не пришёл разделитель, строка с `|` неотличима от обычного текста.
+    it "печатает строку с трубой как текст, когда разделителя не было" do
+      expect(render("Выбор: | да | нет |\nвторая")).to eq("Выбор: | да | нет |\n  вторая")
+    end
+
+    it "не принимает трубу внутри блока кода за таблицу" do
+      expect(render("```\n| a | b |\n|---|---|\n```").lines.first.chomp).to eq("<gray>| a | b |</>")
+    end
+
+    # Экранированная труба — часть ячейки: без этого одна такая сдвигала бы
+    # всю строку на колонку влево.
+    it "не режет ячейку по экранированной трубе" do
+      table = "| a | b |\n|---|---|\n| x \\| y | 2 |"
+
+      expect(render(table).lines.last.chomp).to eq("  x | y  2")
+    end
+
+    # Вылезшее за колонку слово сдвигает всю строку, и колонки перестают
+    # быть колонками — то есть пропадает всё, ради чего таблица рисуется.
+    it "ужимает колонки и рвёт длинное слово, когда таблица шире терминала" do
+      table = "| Файл | Описание |\n|---|---|\n| lib/mini_agent/command_guard.rb | политика подтверждений |"
+
+      expect(render(table).lines.map(&:chomp).last(2)).to eq(
+        ["  lib/mini_agent/com  политика", "  mand_guard.rb       подтверждений"]
+      )
+    end
+
+    it "дорисовывает таблицу, когда ответ ею кончился" do
+      markdown.feed("| a |\n|---|\n| 1 |")
+
+      expect(markdown.flush).to eq("<bold>a</>\n  ─\n  1")
+    end
+  end
+
   describe "перенос" do
     it "укладывается в ширину терминала" do
       lines = render("слово " * 20).split("\n")
@@ -131,6 +201,18 @@ RSpec.describe MiniAgent::Markdown do
   describe "поток" do
     it "даёт тот же вывод, что и целый текст" do
       text = "# Отчёт\nНашёл **три** ошибки в `agent.rb`.\n\n- первая, довольно длинная строка про неё\n- вторая"
+      streamed = +""
+      text.each_char { |char| streamed << markdown.feed(char) }
+      streamed << markdown.flush
+
+      expect(streamed).to eq(described_class.new(paint: paint, width: 40).render(text))
+    end
+
+    # Главная страховка таблиц. Они — единственное, что копится целиком, то есть
+    # единственное место, где вывод отстаёт от потока; разойтись с обычным
+    # режимом он при этом не имеет права.
+    it "даёт тот же вывод на тексте с таблицей" do
+      text = "Итог:\n\n| Файл | Тест |\n|---|---|\n| card.rb | есть |\n\nВсё."
       streamed = +""
       text.each_char { |char| streamed << markdown.feed(char) }
       streamed << markdown.flush

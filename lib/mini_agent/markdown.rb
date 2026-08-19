@@ -48,6 +48,7 @@ module MiniAgent
     def initialize(paint: nil, width: nil)
       @paint = paint || ->(text, *_styles) { text }
       @wrap = TextWrap.new(paint: @paint, indent: INDENT, width: width)
+      @table = Table.new(inline: method(:inline), wrap: @wrap, indent: INDENT)
       reset
     end
 
@@ -65,10 +66,13 @@ module MiniAgent
     # Хвост без перевода строки плюс сброс состояния. Состояние сбрасывается
     # именно здесь: рендерер живёт всю сессию, а незакрытый ``` из прошлого
     # ответа отдал бы следующий дословно и без разметки.
+    # Незакрытая таблица дорисовывается после хвоста, а не до: хвост может
+    # оказаться её последней строкой.
     def flush
-      tail = @buffer.empty? ? "" : render_line(@buffer).to_s.chomp
+      tail = @buffer.empty? ? "" : render_line(@buffer).to_s
+      tail += release if @rows
       reset
-      tail
+      tail.chomp
     end
 
     # Целый текст сразу (непотоковый режим). Через feed и flush, а не своим
@@ -94,16 +98,20 @@ module MiniAgent
       @buffer = +""
       @code = false
       @started = false
+      @rows = nil
     end
 
-    # nil означает «печатать нечего»: так исчезают строки ограды ```.
-    # Пустая строка от них отличается — она разделяет абзацы.
+    # nil означает «печатать нечего»: так исчезают строки ограды ``` и строки
+    # копящейся таблицы. Пустая строка от них отличается — она разделяет абзацы.
     def render_line(line)
       return toggle_code if line.match?(FENCE)
       # Внутри блока кода строка отдаётся дословно: ни разметки, ни переноса.
       # Перенесённая команда выглядит копируемой и таковой не является —
-      # именно это и есть цена «красивого» переноса кода.
+      # именно это и есть цена «красивого» переноса кода. Ограда и код стоят
+      # первыми и по второй причине: `|` внутри кода — не таблица.
       return emit(@paint.call(line, :gray)) if @code
+      return collect(line) if @rows
+      return start_table(line) if Table.row?(line)
 
       emit(block(line))
     end
@@ -111,6 +119,40 @@ module MiniAgent
     def toggle_code
       @code = !@code
       nil
+    end
+
+    # Первая строка таблицы неотличима от обычного текста с `|`, пока не придёт
+    # строка разделителя, — поэтому она не печатается, а копится.
+    def start_table(line)
+      @rows = [line]
+      nil
+    end
+
+    # Блок кончился — печатаем накопленное и разбираем строку заново обычным
+    # путём: она может начинать следующий блок.
+    def collect(line)
+      if accepts?(line)
+        @rows << line
+        return nil
+      end
+
+      "#{release}#{render_line(line)}"
+    end
+
+    def accepts?(line)
+      @rows.length == 1 ? Table.divider?(line) : Table.row?(line)
+    end
+
+    # Таблица печатается разом: ширина колонки — это максимум по всем строкам,
+    # и до последней из них её не знает никто. Это единственное место, где
+    # вывод отстаёт от потока, и отстаёт он ровно на длину таблицы. Блок,
+    # оказавшийся не таблицей (разделителя не было), печатается теми же
+    # строками, что пришли, обычной разметкой.
+    def release
+      rows = @rows
+      @rows = nil
+      lines = Table.table?(rows) ? @table.call(rows) : rows.map { |line| block(line) }
+      lines.map { |line| emit(line) }.join
     end
 
     # Пустая строка остаётся пустой: отступ на ней дал бы висящие пробелы,

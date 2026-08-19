@@ -31,14 +31,32 @@ module MiniAgent
       # по нему отключала бы перенос ровно там, где он нужнее всего.
       return paint_parts(segments) if width < MIN_WIDTH
 
-      lines = fill(words(segments), width - @indent.length - hang.length)
-      lines.map { |line| paint_parts(merge(line_parts(line))) }
-           .join("\n#{@indent}#{hang}")
+      lines(segments, width - @indent.length - hang.length)
+        .map(&:first)
+        .join("\n#{@indent}#{hang}")
     end
 
-    private
+    # Разбитые по ширине строки: пары «раскрашенный текст, длина без раскраски».
+    # Длина отдаётся вместе с текстом, потому что по готовой строке её уже
+    # не измерить — ANSI-коды занимают знаки, но не столбцы. Нужна тому, кто
+    # выравнивает колонки (Table): подкладка пробелами считается по столбцам.
+    #
+    # hard — рвать ли слово, которое длиннее лимита. В прозе не рвём (см. fill),
+    # в ячейке таблицы рвём: вылезшее слово сдвигает всю строку, и колонки
+    # перестают быть колонками, то есть пропадает единственное, ради чего
+    # таблица и рисуется.
+    def lines(segments, limit, hard: false)
+      items = words(segments)
+      items = items.flat_map { |word| chop(word, limit) } if hard
+      fill(items, limit).map do |line|
+        parts = merge(line_parts(line))
+        [paint_parts(parts), parts.sum { |content, _| content.length }]
+      end
+    end
 
     def width = @width || Terminal.width
+
+    private
 
     # Слова, каждое — список своих кусков со стилями. Слово, а не кусок,
     # потому что разметка кончается посреди слова: `код`, — это «код» и «,»
@@ -77,6 +95,35 @@ module MiniAgent
         lines.last << word
       end
       lines.reject(&:empty?)
+    end
+
+    # Слово, разрезанное по лимиту, — несколько слов. Режется по кускам,
+    # а не по готовой строке: раскраска накладывается позже, и разрез
+    # по ней пришёлся бы на середину ANSI-кода.
+    def chop(word, limit)
+      return [word] if limit < 1 || word.sum { |content, _| content.length } <= limit
+
+      pieces = [[]]
+      room = limit
+      word.each { |part| room = cut(pieces, part, room, limit) }
+      pieces.reject(&:empty?)
+    end
+
+    # Кусок укладывается в остаток строки, что не влезло — переносится
+    # в следующую. Отдаёт новый остаток.
+    def cut(pieces, part, room, limit)
+      text, style = part
+      until text.empty?
+        take = text[0, room]
+        pieces.last << [take, style]
+        text = text[take.length..]
+        room -= take.length
+        next unless room.zero?
+
+        pieces << []
+        room = limit
+      end
+      room
     end
 
     # Строка обратно из слов, с пробелами между ними. Пробел получает стиль
