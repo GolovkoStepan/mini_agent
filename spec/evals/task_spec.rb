@@ -21,7 +21,15 @@ RSpec.describe Evals::Task do
   it "подставляет умолчание ходов и пустую подготовку" do
     task = described_class.new(minimal)
 
-    expect([task.max_turns, task.setup]).to eq([described_class::DEFAULT_MAX_TURNS, []])
+    expect([task.max_turns, task.setup, task.agent_flags]).to eq([described_class::DEFAULT_MAX_TURNS, [], []])
+  end
+
+  # Условие, в котором задача измеряется, принадлежит ей самой: то же условие
+  # в ARGS действовало бы на всю матрицу.
+  it "читает флаги агента" do
+    task = described_class.new(minimal.merge("agent_flags" => ["--policy", "ask"]))
+
+    expect(task.agent_flags).to eq(["--policy", "ask"])
   end
 
   # Задача без проверок прошла бы каждый прогон успешно, ничего не проверив:

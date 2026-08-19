@@ -6,9 +6,9 @@ RSpec.describe Evals::Runner do
 
   after { FileUtils.remove_entry(out) }
 
-  def task(checks: ["true"], setup: [], name: "a", prompt: "сделай")
+  def task(checks: ["true"], setup: [], name: "a", prompt: "сделай", flags: [])
     Evals::Task.new({ "name" => name, "prompt" => prompt, "checks" => checks,
-                      "setup" => setup, "max_turns" => 4 })
+                      "setup" => setup, "max_turns" => 4, "agent_flags" => flags })
   end
 
   def preset(sampling = {})
@@ -35,6 +35,22 @@ RSpec.describe Evals::Runner do
     # существует ради повторения прогона копированием.
     it "отказывается от личного файла настроек" do
       expect(runner.command(task, preset, "/тмп/п", 7)).to include("--no-settings")
+    end
+
+    # Условие задачи в строке команды, а не в ARGS: то же условие снаружи
+    # действовало бы на всю матрицу.
+    it "передаёт флаги задачи" do
+      line = runner.command(task(flags: ["--policy", "ask"]), preset, "/тмп/п", 7)
+
+      expect(line).to include("--policy ask")
+    end
+
+    # Набор — то, что сравнивается между собой, поэтому он сильнее задачи:
+    # иначе задача с параметром сэмплинга молча ломала бы сравнение.
+    it "ставит флаги набора после флагов задачи" do
+      line = runner.command(task(flags: ["--temperature", "0.9"]), preset({ "temperature" => 0.3 }), "/тмп/п", 7)
+
+      expect(line.index("--temperature 0.9")).to be < line.index("--temperature 0.3")
     end
 
     it "не передаёт зерно, когда его отключили" do

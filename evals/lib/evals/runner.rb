@@ -68,6 +68,11 @@ module Evals
                # прогона копированием, и отказ должен быть в ней виден.
                "--no-settings",
                "--max-turns", task.max_turns.to_s]
+      # Флаги задачи — это условие, в котором она измеряется (`--policy ask`
+      # у cancelled-report). Стоят ДО набора намеренно: набор перебивает
+      # задачу, и задача с `--temperature` не сможет молча испортить сравнение
+      # наборов, ради которого стенд и заведён.
+      parts += task.agent_flags
       parts += preset.flags
       parts += ["--seed", seed.to_s] if seed
       parts += @extra

@@ -22,13 +22,19 @@ module Evals
     # бы все прогоны успешно, ничего не проверив, — то есть отчёт был бы
     # не пустым, а ложным.
     REQUIRED = %w[name prompt checks].freeze
-    ALLOWED = (REQUIRED + %w[setup max_turns about]).freeze
+    ALLOWED = (REQUIRED + %w[setup max_turns about agent_flags]).freeze
 
     # Умолчание ходов: задачи держатся мелкими намеренно (см. evals/README.md),
     # а упор в лимит — это и есть сигнал «модель топчется на месте».
     DEFAULT_MAX_TURNS = 8
 
-    attr_reader :name, :prompt, :setup, :checks, :max_turns, :about
+    # Условия, в которых задача измеряется, задаются ею самой (`agent_flags`),
+    # а не строкой запуска. Условие в ARGS действует на всю матрицу, то есть
+    # задача, требующая `--policy ask`, в обычном `make evals` мерила бы не то,
+    # ради чего заведена. Набор при этом сильнее: его флаги идут последними
+    # и перебивают задачу, иначе задача с `--temperature` молча ломала бы
+    # сравнение наборов между собой (см. Runner#command).
+    attr_reader :name, :prompt, :setup, :checks, :max_turns, :about, :agent_flags
 
     def self.load_all(dir, names: nil)
       files = Dir.glob(File.join(dir, "*.json"))
@@ -60,6 +66,7 @@ module Evals
       @setup = Array(data["setup"])
       @max_turns = data["max_turns"] || DEFAULT_MAX_TURNS
       @about = data["about"]
+      @agent_flags = Array(data["agent_flags"])
     end
 
     private
