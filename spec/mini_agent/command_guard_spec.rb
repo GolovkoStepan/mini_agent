@@ -208,6 +208,47 @@ RSpec.describe MiniAgent::CommandGuard do
     it "не применяет денилист к пути" do
       expect(guard(policy: :deny).verdict_for("write_file rm -rf.txt", read_only: false)).to be(:allow)
     end
+
+    # Зато сам выход за рабочий каталог — это и есть денилист для файловой
+    # операции: спрашивается при умолчательной политике, которая всё прочее
+    # выполняет молча.
+    it "спрашивает про запись за пределы каталога при умолчательной политике" do
+      prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+      verdict = guard(prompt: prompt).verdict_for("write_file /tmp/a.rb", read_only: false, outside_cwd: true)
+
+      expect(verdict).to be(:cancelled)
+      expect(prompt).to have_received(:confirm?)
+    end
+
+    it "выполняет разрешённую запись за пределы каталога" do
+      prompt = instance_spy(MiniAgent::Prompt, confirm?: true)
+
+      expect(guard(prompt: prompt).verdict_for("write_file /tmp/a.rb", read_only: false, outside_cwd: true))
+        .to be(:allow)
+    end
+
+    # unsafe значит «не спрашивать», и на выход за каталог это тоже
+    # распространяется — ровно как на денилист.
+    it "не спрашивает про запись за пределы каталога при политике unsafe" do
+      prompt = instance_spy(MiniAgent::Prompt)
+
+      verdict = guard(policy: :unsafe, prompt: prompt)
+                .verdict_for("write_file /tmp/a.rb", read_only: false, outside_cwd: true)
+
+      expect(verdict).to be(:allow)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    # Порядок тот же, что у команд: планирование раньше денилиста, иначе
+    # появился бы вопрос «выполнять?» ровно там, где договорились не выполнять.
+    it "отвергает запись за пределы каталога режимом планирования, не спрашивая" do
+      prompt = instance_spy(MiniAgent::Prompt)
+      verdict = guard(prompt: prompt, planning: true)
+                .verdict_for("write_file /tmp/a.rb", read_only: false, outside_cwd: true)
+
+      expect(verdict).to be(:planning)
+      expect(prompt).not_to have_received(:confirm?)
+    end
   end
 
   describe "#verdict при политике unsafe" do

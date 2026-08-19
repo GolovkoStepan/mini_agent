@@ -79,8 +79,13 @@ module MiniAgent
     # `action` — описание для человека («write_file lib/foo.rb»), а не команда:
     # выполняться оно не будет нигде, поэтому денилист к нему неприменим.
     # Опасность файловой операции — это её путь, а пути денилист не разбирает.
-    def verdict_for(action, read_only:)
-      decide(action, read_only: read_only, dangerous: false)
+    #
+    # Отсюда `outside_cwd`: он и есть денилист для файловой операции — запись
+    # мимо рабочего каталога спрашивается при любой политике, ровно как `rm -rf`.
+    # Считает его сам инструмент: cwd известен ему, а не охране, и второй
+    # источник этого пути разошёлся бы с тем, что уходит в chdir: процессу.
+    def verdict_for(action, read_only:, outside_cwd: false)
+      decide(action, read_only: read_only, dangerous: outside_cwd, warning: Messages::OUTSIDE_CWD_WRITE)
     end
 
     private
@@ -88,7 +93,7 @@ module MiniAgent
     # Порядок ветвлений — тот самый, что описан у verdict: сперва режим
     # планирования (для команд он же и есть проверка на чтение), затем
     # денилист, и только потом политика.
-    def decide(subject, read_only:, dangerous:)
+    def decide(subject, read_only:, dangerous:, warning: Messages::DANGEROUS_COMMAND)
       return :planning unless @plan_mode.permits?(read_only: read_only)
 
       if @policy == :unsafe
@@ -96,7 +101,7 @@ module MiniAgent
         return :allow
       end
 
-      return confirmed(Messages::DANGEROUS_COMMAND, subject) if dangerous
+      return confirmed(warning, subject) if dangerous
       return :allow if @policy == :deny || read_only
 
       confirmed(Messages::WRITING_COMMAND, subject)

@@ -35,10 +35,13 @@ module MiniAgent
         path = arguments["path"].to_s.strip
         return Messages::Tool::FILE_NO_PATH if path.empty?
 
-        case @guard.verdict_for(format(action, path: path), read_only: read_only?)
-        when :cancelled then Messages::CANCELLED
+        full = resolve(path)
+        outside = outside_cwd?(full)
+
+        case @guard.verdict_for(format(action, path: path), read_only: read_only?, outside_cwd: outside)
+        when :cancelled then outside ? Messages::Tool::OUTSIDE_CWD_CANCELLED : Messages::CANCELLED
         when :planning then Messages::PLAN_REFUSED
-        else perform(resolve(path), path, arguments)
+        else perform(full, path, arguments)
         end
       rescue SystemCallError, IOError => e
         format(Messages::Tool::FILE_FAILED, message: e.message)
@@ -50,6 +53,29 @@ module MiniAgent
       # `ls` показывал бы один каталог, а read_file читал бы из другого,
       # и заметить это можно было бы только по содержимому файлов.
       def resolve(path) = File.expand_path(path, @cwd || Dir.pwd)
+
+      # Денилист для файловой операции: у неё опасность — это путь, а путей
+      # CommandGuard::DANGEROUS_PATTERNS не разбирает. Найдено оценочными
+      # задачами: модель перепечатала длинный абсолютный путь с ошибкой,
+      # записала файл в получившийся каталог, там же его перечитала, там же
+      # проверила — и отчиталась успехом. Проверка внутри выдуманного дерева
+      # сходится сама с собой, поэтому изнутри ошибка невидима; заметен только
+      # сам выход за каталог, и спрашивать про него надо при любой политике.
+      #
+      # Чтение сюда не входит намеренно: заглянуть в чужой файл — обычное дело
+      # (промпт агента, конфиг, соседний проект), и вопрос на каждый такой
+      # read_file превратился бы в шум, за которым не видно записи.
+      #
+      # expand_path, а не realpath: у write_file файла ещё нет, и realpath
+      # упал бы на нём Errno::ENOENT. Символьная ссылка мимо каталога этой
+      # проверкой, стало быть, не ловится — песочницей она не является, как
+      # и оба списка CommandGuard.
+      def outside_cwd?(full)
+        return false if read_only?
+
+        base = File.expand_path(@cwd || Dir.pwd)
+        full != base && !full.start_with?("#{base}#{File::SEPARATOR}")
+      end
 
       # Читаем как UTF-8 и заменяем негодные байты на U+FFFD — на той же
       # границе и по той же причине, что ProcessRunner делает это с выводом

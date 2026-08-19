@@ -97,6 +97,19 @@ RSpec.describe MiniAgent::Tools::ReadFile do
     expect(described_class.new(guard: guard, cwd: dir).call({ "path" => "a.txt" })).to eq("текст")
   end
 
+  # Вопрос про выход за рабочий каталог задаётся только записи: заглянуть
+  # в чужой файл — обычное дело (конфиг, соседний проект), и подтверждение
+  # на каждое такое чтение стало бы шумом, за которым не видно записи.
+  it "не спрашивает про чтение за пределами рабочего каталога" do
+    outside = File.join(Dir.mktmpdir, "a.txt")
+    File.write(outside, "текст")
+    prompt = instance_spy(MiniAgent::Prompt)
+    guard = MiniAgent::CommandGuard.new(prompt: prompt)
+
+    expect(described_class.new(guard: guard, cwd: dir).call({ "path" => outside })).to eq("текст")
+    expect(prompt).not_to have_received(:confirm?)
+  end
+
   # Ошибка файловой системы — это результат, который модель должна прочитать
   # и обработать, а не исключение, роняющее цикл агента.
   it "возвращает ошибку доступа строкой" do

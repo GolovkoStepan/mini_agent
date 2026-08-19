@@ -88,6 +88,42 @@ RSpec.describe MiniAgent::Tools::WriteFile do
     expect(File.exist?(File.join(dir, "a.txt"))).to be(false)
   end
 
+  # Дефект, найденный оценочными задачами: модель перепечатала длинный
+  # абсолютный путь с ошибкой и записала файл мимо каталога, в котором её
+  # просили работать, — а потом там же его перечитала и отчиталась успехом.
+  # Спрашивается при умолчательной политике, которая всё прочее выполняет молча.
+  it "спрашивает про запись за пределы рабочего каталога" do
+    prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+    guard = MiniAgent::CommandGuard.new(prompt: prompt)
+    outside = File.join(Dir.mktmpdir, "a.txt")
+    result = described_class.new(guard: guard, cwd: dir).call({ "path" => outside, "content" => "текст" })
+
+    expect(prompt).to have_received(:confirm?)
+    expect(result).to eq(MiniAgent::Messages::Tool::OUTSIDE_CWD_CANCELLED)
+    expect(File.exist?(outside)).to be(false)
+  end
+
+  # Относительный путь мимо каталога — тот же выход за его пределы: считается
+  # разрешённый путь, а не написанный.
+  it "спрашивает и про путь через .." do
+    prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+    guard = MiniAgent::CommandGuard.new(prompt: prompt)
+    described_class.new(guard: guard, cwd: dir).call({ "path" => "../a.txt", "content" => "текст" })
+
+    expect(prompt).to have_received(:confirm?)
+  end
+
+  # Обратная сторона: внутри каталога вопросов быть не должно, иначе
+  # умолчательная политика перестанет быть умолчательной.
+  it "не спрашивает про запись внутри рабочего каталога" do
+    prompt = instance_spy(MiniAgent::Prompt)
+    guard = MiniAgent::CommandGuard.new(prompt: prompt)
+    described_class.new(guard: guard, cwd: dir).call({ "path" => "a.txt", "content" => "текст" })
+
+    expect(prompt).not_to have_received(:confirm?)
+    expect(File.read(File.join(dir, "a.txt"))).to eq("текст")
+  end
+
   it "отвергается режимом планирования, ничего не записав" do
     guard = MiniAgent::CommandGuard.new(prompt: MiniAgent::Prompt::AutoApprove.new,
                                         plan_mode: MiniAgent::PlanMode.new(enabled: true))

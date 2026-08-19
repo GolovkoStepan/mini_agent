@@ -306,7 +306,7 @@ module MiniAgent
     def initialize: (?policy: Symbol, ?prompt: untyped, ?ui: UI?, ?plan_mode: PlanMode) -> void
     def self.dangerous?: (String command) -> bool
     def verdict: (String command) -> verdict
-    def verdict_for: (String action, read_only: bool) -> verdict
+    def verdict_for: (String action, read_only: bool, ?outside_cwd: bool) -> verdict
   end
 
   module Tools
