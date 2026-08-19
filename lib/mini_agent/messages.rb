@@ -38,8 +38,16 @@ module MiniAgent
       not the working directory, not environment variables, not shell functions.
       A `cd` on its own is silently undone — the next call starts where the first
       one did. Chain what belongs together in a single call instead:
-      `cd sub && ls`, not `cd sub` followed by `ls`. Use absolute paths when the
-      target is far from the working directory.
+      `cd sub && ls`, not `cd sub` followed by `ls`.
+
+      Write paths relative to the working directory: `lib/counter.rb`, not
+      `/home/you/project/lib/counter.rb`. The tools resolve a relative path
+      against that directory themselves, so it cannot land anywhere else.
+      A long absolute path retyped by hand can, and the mistake hides itself:
+      the file looks created, reading it back succeeds, and every check you run
+      passes — inside a directory that is not the one you were asked to work in.
+      Use an absolute path only when the target is genuinely outside the
+      working directory.
 
       Style:
       - Answer immediately. No preamble, no sign-off, no closing summary.
@@ -66,6 +74,9 @@ module MiniAgent
     # Названы придуманные пути, а не просто «работай здесь»: запрет, не
     # называющий того, что запрещает, модель применяет к чему угодно.
     #
+    # Просьба не перепечатывать каталог в пути стоит рядом с самим каталогом,
+    # а не только в промпте выше: перепечатывают именно то, что видят здесь.
+    #
     # Система берётся из RbConfig, а не из `uname`: значение нужно при каждой
     # сборке истории (/clear, /compact), а запускать ради постоянного числа
     # процесс — расход на пустом месте. В отличие от каталога, это
@@ -81,6 +92,8 @@ module MiniAgent
 
       Every `bash` call starts in that directory. Never guess a different one:
       invented paths like `/home/user` or `~/project` do not exist here.
+      Do not retype it into paths either — write `lib/a.rb`, not the whole path
+      again.
     PROMPT
 
     # Описание проекта приклеивается к системному промпту размеченным блоком.
