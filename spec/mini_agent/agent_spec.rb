@@ -52,6 +52,20 @@ RSpec.describe MiniAgent::Agent do
       expect(out.string).to include("пустой ответ")
       expect(agent).not_to be_failed
     end
+
+    # Найдено оценочными задачами: модель выдала 1747 знаков размышлений,
+    # кончила их выводом «this should work», не вызвала edit_file — и агент
+    # вышел с нулём, то есть отчитался об успехе, ничего не сделав.
+    #
+    # :unfinished, а не :failed: сервер ответил исправно, повторять с теми же
+    # настройками осмысленно — та же граница, что между кодами 4 и 3.
+    it "считает задачу недоделанной, а не выполненной" do
+      allow(client).to receive(:chat).and_return(["", []])
+
+      agent.run("задача")
+
+      expect(agent.outcome).to eq(:unfinished)
+    end
   end
 
   # Найдено живой проверкой: qwen3.6 отдаёт размышления отдельным полем
