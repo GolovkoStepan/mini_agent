@@ -49,6 +49,21 @@ module MiniAgent
       [:model, "--model NAME", Messages::OPT_MODEL],
       [:stream, "--[no-]stream", Messages::OPT_STREAM],
       [:auto_compact, "--[no-]auto-compact", Messages::OPT_AUTO_COMPACT],
+      # Без типа Float намеренно: разбор и проверку диапазона делает Config,
+      # и «--compact-at abc» обязано падать одним и тем же ConfigError
+      # независимо от того, пришло значение флагом или из AUTO_COMPACT_AT.
+      [:compact_at, "--compact-at N", Messages::OPT_COMPACT_AT],
+      [:markdown, "--[no-]markdown", Messages::OPT_MARKDOWN],
+      # Параметры сэмплинга. Умолчаний у них нет: не задано — не отправляем,
+      # решает пресет сервера (см. Sampling).
+      [:temperature, "--temperature N", Float, Messages::OPT_TEMPERATURE],
+      [:top_p, "--top-p N", Float, Messages::OPT_TOP_P],
+      [:top_k, "--top-k N", Integer, Messages::OPT_TOP_K],
+      [:min_p, "--min-p N", Float, Messages::OPT_MIN_P],
+      [:repeat_penalty, "--repeat-penalty N", Float, Messages::OPT_REPEAT_PENALTY],
+      [:presence_penalty, "--presence-penalty N", Float, Messages::OPT_PRESENCE_PENALTY],
+      [:frequency_penalty, "--frequency-penalty N", Float, Messages::OPT_FREQUENCY_PENALTY],
+      [:seed, "--seed N", Integer, Messages::OPT_SEED],
       [:policy, "--policy NAME", Messages::OPT_POLICY],
       [:plan, "--plan", Messages::OPT_PLAN],
       [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
@@ -95,7 +110,7 @@ module MiniAgent
 
     def run(options, args, parser)
       config = Config.new(options)
-      ui = UI.new(out: @out)
+      ui = UI.new(out: @out, markdown: config.markdown?)
 
       return list_models(config, ui) if options[:list_models]
       return interactive(config, ui) if options[:interactive]
@@ -104,12 +119,11 @@ module MiniAgent
       return usage(parser) if task.empty?
 
       with_connection(config, ui) do |agent|
-        agent.run(task)
-        # Про невыполненный план говорится прямо: ответ модели — это план,
-        # и без строки под ним он читается как отчёт о сделанном. Вопроса
-        # «выполнять?» здесь нет намеренно: разовый запуск на то и разовый,
-        # а согласие спрашивают в интерактивном режиме, где есть у кого.
-        ui.puts(Messages::PLAN_ONE_SHOT) if config.plan?
+        # Вопроса «выполнять?» при --plan нет намеренно: разовый запуск на то
+        # и разовый, а согласие спрашивают в интерактивном режиме, где есть
+        # у кого. Через Planner, а не run: план надо ещё сохранить в файл —
+        # здесь он единственный продукт запуска и живёт до прокрутки буфера.
+        config.plan? ? agent.plan(task, nil, confirm: false) : agent.run(task)
         EXIT_CODES.fetch(agent.outcome, EXIT_OK)
       end
     end

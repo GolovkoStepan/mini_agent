@@ -92,7 +92,7 @@ RSpec.describe MiniAgent::ProjectContext do
 
         loaded = described_class.new(@dir, window: 8192).load
 
-        expect(loaded.size).to be <= (8192 * described_class::SHARE * described_class::CHARS_PER_TOKEN) + 100
+        expect(loaded.size).to be <= (8192 * described_class::SHARE * MiniAgent::Window::CHARS_PER_TOKEN) + 100
         expect(loaded).to include("обрезано")
       end
 

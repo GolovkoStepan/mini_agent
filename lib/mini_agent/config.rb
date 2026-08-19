@@ -48,11 +48,25 @@ module MiniAgent
       # только в интерактивном режиме и только человеку, который в этот
       # момент смотрит на экран.
       auto_compact: true,
+      # С какой доли занятого окна считать, что место кончается: и предупредить
+      # в /context, и свернуть диалог самому. Умолчание — Window::WARN_AT;
+      # настройкой оно стало потому, что три четверти выбраны под запас на
+      # один ход вслепую, а не под качество ответов: небольшие сети начинают
+      # путаться заметно раньше, и правильный порог должны показать оценочные
+      # задачи. Числом здесь nil не пишем: порог нужен всегда, «не знаю»
+      # для него не бывает.
+      compact_at: Window::WARN_AT,
       # Начинать сессию в режиме планирования. Выключено: планирование —
       # состояние, в которое входят под конкретную задачу, а не свойство
       # запуска. Разовому запуску (--plan) это как раз нужно: он печатает
       # план и выходит, не выполнив его.
       plan: false,
+      # Размечать ответ модели в терминале. Включено: модель пишет markdown
+      # независимо от того, умеем ли мы его читать, и без разметки в тексте
+      # остаются «звёздочки» и «решётки» — то есть выключенный рендерер
+      # выглядит хуже, чем его отсутствие. Вне терминала признак не спрашивают
+      # вовсе: там разметка выключена в любом случае (см. UI).
+      markdown: true,
       timeout: 120,
       # Ожидание ответа модели. 120 секунд не хватало: на bonsai-27b (Q1_0,
       # рассуждающая) «17*23» заняло 347 секунд, а вопрос на три абзаца —
@@ -112,11 +126,24 @@ module MiniAgent
       policy: "AGENT_POLICY",
       allow_unsafe: "ALLOW_UNSAFE",
       plan: "AGENT_PLAN",
+      markdown: "AGENT_MARKDOWN",
       stream: "LLM_STREAM",
       auto_compact: "AUTO_COMPACT",
+      compact_at: "AUTO_COMPACT_AT",
       timeout: "COMMAND_TIMEOUT",
       cwd: "AGENT_CWD",
-      log: "AGENT_LOG"
+      log: "AGENT_LOG",
+      # Параметры сэмплинга. Префикс LLM_, а не AGENT_: это поля протокола,
+      # уходящие в тело запроса, а не поведение самого агента. Умолчаний
+      # у них в DEFAULTS нет намеренно — см. Sampling.
+      temperature: "LLM_TEMPERATURE",
+      top_p: "LLM_TOP_P",
+      top_k: "LLM_TOP_K",
+      min_p: "LLM_MIN_P",
+      repeat_penalty: "LLM_REPEAT_PENALTY",
+      presence_penalty: "LLM_PRESENCE_PENALTY",
+      frequency_penalty: "LLM_FREQUENCY_PENALTY",
+      seed: "LLM_SEED"
     }.freeze
 
     attr_reader :base_url, :api_key, :model, :max_turns,
@@ -131,13 +158,12 @@ module MiniAgent
     attr_accessor :context_window
 
     def initialize(options = {}, env: ENV)
-      @options = options
-      @env = env
+      @lookup = Lookup.new(options, env, defaults: DEFAULTS, keys: ENV_KEYS)
 
       read_connection
       read_limits
       @policy = read_policy
-      @stream = to_bool(fetch(:stream))
+      @stream = @lookup.bool(:stream)
       @cwd = Paths.directory(fetch(:cwd))
       @log = Paths.file(fetch(:log))
     end
@@ -175,6 +201,23 @@ module MiniAgent
       window_share < @max_tokens
     end
 
+    # Параметры сэмплинга, заданные человеком: хеш «поле протокола → число».
+    # Пустой, если не задано ничего, — и это штатный случай, означающий
+    # «всё решает пресет сервера».
+    #
+    # Запоминается: разбор одинаков от запроса к запросу, а ронять ConfigError
+    # на десятом ходу вместо старта было бы поздно. Первый вызов делает
+    # AgentBuilder при сборке — то есть до первого запроса.
+    def sampling = @sampling ||= Sampling.new(self).to_h
+
+    # Значение, заданное человеком (опцией или переменной окружения), либо nil.
+    #
+    # Открыт наружу ради Sampling: у его ключей нет умолчаний, и обычный
+    # fetch на них падает KeyError. Падение это намеренное — код, спросивший
+    # температуру общим путём, ломается громко, а не получает выдуманное
+    # число, которое потом молча уедет в тело запроса.
+    def given(key) = @lookup.given(key)
+
     # Отдельного поля под этот признак нет: он и есть одна из политик.
     # Держать рядом булев флаг и политику значило бы завести два источника
     # одного решения — и первое же расхождение («allow_unsafe: true, но
@@ -193,13 +236,28 @@ module MiniAgent
     # Вычисляется на месте по той же причине, что и auto_compact?: спрашивают
     # его один раз при сборке, а конструктор Config и без того длиннее,
     # чем хотелось бы.
-    def plan? = to_bool(fetch(:plan))
+    def plan? = @lookup.bool(:plan)
+
+    # Размечать ответ модели. Спрашивают один раз — при создании UI.
+    def markdown? = @lookup.bool(:markdown)
 
     # Сворачивать диалог самостоятельно при нехватке окна.
     #
     # Вычисляется на месте, а не хранится полем: спрашивают его один раз
     # за ход, а конструктор Config и без того длиннее, чем хотелось бы.
-    def auto_compact? = to_bool(fetch(:auto_compact))
+    def auto_compact? = @lookup.bool(:auto_compact)
+
+    # Доля занятого окна, с которой место считается кончившимся.
+    #
+    # Проверяется, в отличие от параметров сэмплинга: там границы знает
+    # сервер и он же отвергнет негодное, а здесь спорить не с кем. Ноль
+    # означал бы «сворачивать каждый ход», в том числе на пустой истории,
+    # то есть бесконечный обмен резюме на резюме; больше единицы — «никогда»,
+    # но сказанное так, будто порог есть. Оба случая молча ломают именно то,
+    # ради чего порог задают, поэтому запуск падает.
+    def compact_at
+      @compact_at ||= share(fetch(:compact_at))
+    end
 
     def chat_uri
       URI.parse("#{@base_url}/chat/completions")
@@ -214,6 +272,18 @@ module MiniAgent
     end
 
     private
+
+    # Доля из отрезка (0, 1]. Float(), а не to_f: «AUTO_COMPACT_AT=abc»
+    # превратилось бы в 0.0, то есть в «сворачивать каждый ход» — тот же
+    # выбор, что у Sampling и у неизвестной политики.
+    def share(value)
+      number = Float(value)
+      raise ArgumentError unless number.positive? && number <= 1
+
+      number
+    rescue ArgumentError, TypeError
+      raise ConfigError, format(Messages::INVALID_COMPACT_AT, value: value)
+    end
 
     # Доля окна под ответ. Отдельным методом, потому что спрашивают её
     # двое — сам лимит и признак его происхождения, — а разошедшийся счёт
@@ -233,7 +303,7 @@ module MiniAgent
       @retry_count = fetch(:retry_count).to_i
       @retry_delay = fetch(:retry_delay).to_f
       @max_tokens = fetch(:max_tokens).to_i
-      @max_tokens_given = given?(:max_tokens)
+      @max_tokens_given = @lookup.given?(:max_tokens)
       @timeout = fetch(:timeout).to_f
       @llm_timeout = fetch(:llm_timeout).to_f
       @context_window = positive_or_nil(fetch(:context_window))
@@ -257,7 +327,7 @@ module MiniAgent
     # иначе `--policy ask --allow-unsafe` разрешалось бы угадыванием, а из
     # двух указаний верить надо более точному.
     def read_policy
-      return :unsafe if to_bool(fetch(:allow_unsafe)) && !given?(:policy)
+      return :unsafe if @lookup.bool(:allow_unsafe) && !@lookup.given?(:policy)
 
       value = fetch(:policy).to_s.strip.downcase.to_sym
       return value if CommandGuard::POLICIES.include?(value)
@@ -266,32 +336,9 @@ module MiniAgent
                                                           known: CommandGuard::POLICIES.join(", "))
     end
 
-    # Значение задано человеком, а не взято из умолчаний. Нужно там, где
-    # есть второе указание того же смысла: политике (--allow-unsafe) и
-    # max_tokens (доля от окна).
-    def given?(key)
-      return true if @options.key?(key) && !@options[key].nil?
-
-      value = @env[ENV_KEYS.fetch(key)]
-      !(value.nil? || value.empty?)
-    end
-
-    # options.key? вместо проверки на истинность: иначе явное false
-    # (флаг --no-allow-unsafe) не смогло бы перебить ALLOW_UNSAFE=true.
-    def fetch(key)
-      return @options[key] if @options.key?(key) && !@options[key].nil?
-
-      env_value = @env[ENV_KEYS.fetch(key)]
-      return env_value unless env_value.nil? || env_value.empty?
-
-      DEFAULTS.fetch(key)
-    end
-
-    def to_bool(value)
-      case value
-      when true, false then value
-      else %w[true 1 yes].include?(value.to_s.strip.downcase)
-      end
-    end
+    # Одно правило чтения на всех живёт в Lookup: options (CLI) → ENV →
+    # умолчание. Здесь остаётся сокращение — читается оно в конструкторе
+    # десяток раз подряд.
+    def fetch(key) = @lookup.fetch(key)
   end
 end

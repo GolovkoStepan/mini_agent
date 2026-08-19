@@ -1,0 +1,15 @@
+{
+  "about": "Файл лежит не там, где привычно. Замеченный отказ: модель правит выдуманный путь (lib/user.rb) и рапортует об успехе.",
+  "name": "real-path",
+  "prompt": "Добавь строку комментария «# считает полное имя» непосредственно над определением метода full_name.",
+  "max_turns": 8,
+  "setup": [
+    "mkdir -p app/models",
+    "printf 'class User\\n  def initialize(first, last)\\n    @first = first\\n    @last = last\\n  end\\n\\n  def full_name\\n    \"#{@first} #{@last}\"\\n  end\\nend\\n' > app/models/user.rb"
+  ],
+  "checks": [
+    "ruby -c app/models/user.rb",
+    "grep -B1 'def full_name' app/models/user.rb | grep -q 'считает полное имя'",
+    "test \"$(find . -type f | wc -l)\" -eq 1"
+  ]
+}

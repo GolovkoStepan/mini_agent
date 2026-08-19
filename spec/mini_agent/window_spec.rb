@@ -103,6 +103,16 @@ RSpec.describe MiniAgent::Window do
       expect(starved.free).to eq(3192)
     end
 
+    # Три четверти выбраны под запас на один ход вслепую, а не под качество
+    # ответов: небольшие сети путаются заметно раньше, и порог задаётся
+    # настройкой (Config#compact_at).
+    it "берёт порог из настроек, когда он задан" do
+      early = described_class.new(size: 1000, prompt_tokens: 300, max_tokens: 0, warn_at: 0.25)
+
+      expect(early).to be_tight
+      expect(described_class.new(size: 1000, prompt_tokens: 300, max_tokens: 0)).not_to be_tight
+    end
+
     it "не путает тесноту с нехваткой места на ответ" do
       # Тесно, но ответ ещё помещается: 6500 + 200 из 8192, свободно 1692.
       tight = window(size: 8192, prompt: 6500, max_tokens: 200)

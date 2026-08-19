@@ -115,10 +115,18 @@ module MiniAgent
       @ui.warn(format(text, kept: loader.kept, total: Plural.with(loader.total, *Messages::CHARS)))
     end
 
+    # Охрана одна на все инструменты, и каталог у файловых тот же, что уходит
+    # в chdir: ProcessRunner. Разойдись они — `ls` показывал бы один каталог,
+    # а read_file читал бы из другого, и заметить это можно было бы только
+    # по содержимому файлов.
     def build_tools
       guard = CommandGuard.new(policy: @config.policy, prompt: prompt, ui: @ui, plan_mode: plan_mode)
       runner = ProcessRunner.new(timeout: @config.timeout, cwd: @config.cwd)
-      ToolRegistry.new([Tools::Bash.new(guard: guard, runner: runner)])
+      cwd = @config.cwd || Dir.pwd
+      ToolRegistry.new([Tools::Bash.new(guard: guard, runner: runner),
+                        Tools::ReadFile.new(guard: guard, cwd: cwd),
+                        Tools::WriteFile.new(guard: guard, cwd: cwd),
+                        Tools::EditFile.new(guard: guard, cwd: cwd)])
     end
   end
 end

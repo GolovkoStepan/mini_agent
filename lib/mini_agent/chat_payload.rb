@@ -9,8 +9,6 @@ module MiniAgent
   # разбором результата. Порог Metrics/ClassLength указал на это в шестой раз
   # (до того из клиента так выделились ErrorResponse и ChatResponse).
   class ChatPayload
-    TEMPERATURE = 0.1
-
     def initialize(config:, messages:, tools: [], tool_choice: "auto")
       @config = config
       @messages = messages
@@ -20,6 +18,7 @@ module MiniAgent
 
     def to_json(*)
       body = base
+      add_sampling(body)
       add_stream(body)
       add_tools(body)
       body.to_json
@@ -31,10 +30,19 @@ module MiniAgent
       {
         model: @config.model,
         messages: @messages,
-        temperature: TEMPERATURE,
         max_tokens: @config.max_tokens
       }
     end
+
+    # Параметров сэмплинга здесь нет ни одного, пока их не задал человек, —
+    # и это главное свойство тела запроса, а не мелочь оформления.
+    #
+    # Раньше тут стояла константа TEMPERATURE = 0.1, уходившая в каждый
+    # запрос. Поле в теле перебивает пресет, загруженный на сервере, поэтому
+    # выставленная там температура не применялась никогда, а понять это по
+    # поведению было нельзя: агент работал, просто иначе, чем просили.
+    # Что не названо явно — решает сервер; см. Sampling.
+    def add_sampling(body) = body.merge!(@config.sampling)
 
     # include_usage обязателен: без него сервер не присылает usage в потоке
     # вовсе (проверено на LM Studio — ни одного куска с этим полем), и

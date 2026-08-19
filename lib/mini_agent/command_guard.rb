@@ -65,24 +65,42 @@ module MiniAgent
     # Дальше денилист проверяется раньше списка читающих: у команды с
     # подстановкой или перенаправлением ReadOnly и так ответит «нет», но
     # полагаться на это нельзя — при добавлении в список чего-нибудь вроде
-    # `find` опасная форма прошла бы молча.
+    # `find` опасная форма прошла бы молча. Сам порядок живёт в decide.
     def verdict(command)
-      return :planning unless @plan_mode.allows?(command)
+      decide(command, read_only: ReadOnly.command?(command), dangerous: self.class.dangerous?(command))
+    end
 
-      dangerous = self.class.dangerous?(command)
-
-      if @policy == :unsafe
-        warn_only(command) if dangerous
-        return :allow
-      end
-
-      return confirmed(Messages::DANGEROUS_COMMAND, command) if dangerous
-      return :allow if @policy == :deny || ReadOnly.command?(command)
-
-      confirmed(Messages::WRITING_COMMAND, command)
+    # То же решение для операции, которая командой shell не является.
+    # Файловые инструменты знают про себя точно, читают они или пишут, — и
+    # выяснять это разбором строки, со всеми границами ReadOnly, здесь незачем.
+    # Ради этого разделение и заводилось: режим планирования переставал
+    # пропускать чтение по недоразумению.
+    #
+    # `action` — описание для человека («write_file lib/foo.rb»), а не команда:
+    # выполняться оно не будет нигде, поэтому денилист к нему неприменим.
+    # Опасность файловой операции — это её путь, а пути денилист не разбирает.
+    def verdict_for(action, read_only:)
+      decide(action, read_only: read_only, dangerous: false)
     end
 
     private
+
+    # Порядок ветвлений — тот самый, что описан у verdict: сперва режим
+    # планирования (для команд он же и есть проверка на чтение), затем
+    # денилист, и только потом политика.
+    def decide(subject, read_only:, dangerous:)
+      return :planning unless @plan_mode.permits?(read_only: read_only)
+
+      if @policy == :unsafe
+        warn_only(subject) if dangerous
+        return :allow
+      end
+
+      return confirmed(Messages::DANGEROUS_COMMAND, subject) if dangerous
+      return :allow if @policy == :deny || read_only
+
+      confirmed(Messages::WRITING_COMMAND, subject)
+    end
 
     def confirmed(warning, command)
       @ui&.warn(format(warning, command: command))

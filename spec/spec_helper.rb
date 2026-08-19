@@ -1,6 +1,13 @@
 # frozen_string_literal: true
 
 require "mini_agent"
+
+# Оценочные задачи (evals/) в гем не входят и своим путём загрузки с lib/
+# не связаны. Путь добавляется здесь, чтобы их спеки шли тем же `make spec`:
+# отдельный прогон завёл бы вторую команду проверки, о которой забывают.
+$LOAD_PATH.unshift(File.expand_path("../evals/lib", __dir__))
+require "evals"
+
 require "webmock/rspec"
 require "stringio"
 require "tmpdir"

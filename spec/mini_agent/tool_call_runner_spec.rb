@@ -172,5 +172,29 @@ RSpec.describe MiniAgent::ToolCallRunner do
       expect(message[:content].length)
         .to eq(described_class::MAX_TOOL_OUTPUT + MiniAgent::Messages::TRUNCATED_SUFFIX.length)
     end
+
+    # Одно число не бывает верным и при окне 8192, и при 50176: там вывод
+    # команды съедает половину окна, здесь до потолка далеко. Доля считает
+    # от окна ровно так же, как WINDOW_SHARE и ProjectContext::SHARE.
+    it "считает предел долей окна, когда размер известен" do
+      config = MiniAgent::Config.new({ context_window: 8192 }, env: {})
+      runner = described_class.new(tools: tools, ui: ui, config: config)
+      runner.call(conversation, { "id" => "1", "function" => { "name" => "long", "arguments" => "{}" } })
+
+      # 8192 × 0.125 × 2,5 знака на токен — 2560.
+      expect(conversation.to_a.last[:content].length)
+        .to eq(2560 + MiniAgent::Messages::TRUNCATED_SUFFIX.length)
+    end
+
+    # Потолок остаётся потолком: на большом окне доля даёт десятки тысяч
+    # знаков, то есть один вывод команды вытеснил бы весь диалог.
+    it "не превышает потолка на большом окне" do
+      config = MiniAgent::Config.new({ context_window: 262_144 }, env: {})
+      runner = described_class.new(tools: tools, ui: ui, config: config)
+      runner.call(conversation, { "id" => "1", "function" => { "name" => "long", "arguments" => "{}" } })
+
+      expect(conversation.to_a.last[:content].length)
+        .to eq(described_class::MAX_TOOL_OUTPUT + MiniAgent::Messages::TRUNCATED_SUFFIX.length)
+    end
   end
 end

@@ -122,13 +122,34 @@ module MiniAgent
     # причине: строка о нём печатается один раз при запуске и уезжает вверх,
     # а пишется он всю сессию.
     def model
-      @ui.puts(format(Messages::CMD_MODEL_LINE, model: @config.model))
-      @ui.puts(format(Messages::CMD_SERVER_LINE, url: @config.base_url))
-      @ui.puts(format(Messages::CMD_WINDOW_LINE, size: window_size))
-      @ui.puts(format(Messages::CMD_CWD_LINE, path: @config.cwd || Dir.pwd))
-      @ui.puts(format(Messages::CMD_POLICY_LINE, name: Messages::POLICY_NAMES.fetch(@config.policy)))
-      @ui.puts(format(Messages::LOG_STARTED, path: @config.log)) if @config.log
+      model_lines.each { |line| @ui.puts(line) }
       :handled
+    end
+
+    # Строки собираются списком, а не печатаются по одной: печать вперемешку
+    # с шестью вызовами format перевалила порог Metrics/AbcSize, и делить
+    # тут по смыслу нечего — это одна справка об одном запуске.
+    def model_lines
+      lines = [
+        format(Messages::CMD_MODEL_LINE, model: @config.model),
+        format(Messages::CMD_SERVER_LINE, url: @config.base_url),
+        format(Messages::CMD_WINDOW_LINE, size: window_size),
+        format(Messages::CMD_CWD_LINE, path: @config.cwd || Dir.pwd),
+        format(Messages::CMD_POLICY_LINE, name: Messages::POLICY_NAMES.fetch(@config.policy)),
+        format(Messages::CMD_SAMPLING_LINE, params: sampling)
+      ]
+      lines << format(Messages::LOG_STARTED, path: @config.log) if @config.log
+      lines
+    end
+
+    # Пустой сэмплинг — штатное состояние, а не отсутствие данных: агент
+    # не задаёт ничего, и всё решает пресет сервера. Так и говорится, потому
+    # что вопрос «а какая тогда температура» возникает сразу.
+    def sampling
+      params = @config.sampling
+      return Messages::CMD_SAMPLING_SERVER if params.empty?
+
+      params.map { |name, value| format(Messages::CMD_SAMPLING_PAIR, name: name, value: value) }.join(", ")
     end
 
     # Окно показывается рядом с моделью, а не только в /context: это её

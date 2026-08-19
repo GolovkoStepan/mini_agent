@@ -107,6 +107,22 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  describe "#markdown?" do
+    # Модель пишет markdown независимо от того, умеем ли мы его читать:
+    # без разметки в тексте остаются звёздочки и решётки.
+    it "по умолчанию включено" do
+      expect(described_class.new({}, env: {}).markdown?).to be(true)
+    end
+
+    it "выключается флагом --no-markdown" do
+      expect(described_class.new({ markdown: false }, env: {}).markdown?).to be(false)
+    end
+
+    it "выключается через AGENT_MARKDOWN=false" do
+      expect(described_class.new({}, env: { "AGENT_MARKDOWN" => "false" }).markdown?).to be(false)
+    end
+  end
+
   describe "#policy" do
     it "по умолчанию deny" do
       expect(described_class.new({}, env: {}).policy).to eq(:deny)
@@ -282,6 +298,65 @@ RSpec.describe MiniAgent::Config do
 
     it "не считает выведенным умолчание при неизвестном окне" do
       expect(described_class.new({}, env: {}).max_tokens_derived?).to be(false)
+    end
+
+    # given? — общая точка для двух разных вопросов: происхождения лимита и
+    # спора --policy с --allow-unsafe. Появление рядом восьми новых ключей
+    # эту точку трогает, и первое, что здесь сломалось бы, — совет при обрыве
+    # генерации: он молча начал бы посылать не туда.
+    it "не путает соседние настройки: --temperature не меняет происхождения лимита" do
+      config = described_class.new({ temperature: 0.3 }, env: {})
+      config.context_window = 8192
+
+      expect(config.max_tokens_derived?).to be(true)
+    end
+  end
+
+  # Порог, с которого место считается кончившимся. Настройкой стал потому,
+  # что три четверти выбраны под запас на один ход вслепую, а не под качество
+  # ответов, — правильное число должны показать оценочные задачи.
+  describe "#compact_at" do
+    it "по умолчанию берёт порог окна" do
+      expect(described_class.new({}, env: {}).compact_at).to eq(MiniAgent::Window::WARN_AT)
+    end
+
+    it "читает флаг и переменную окружения" do
+      expect(described_class.new({ compact_at: "0.5" }, env: {}).compact_at).to eq(0.5)
+      expect(described_class.new({}, env: { "AUTO_COMPACT_AT" => "0.4" }).compact_at).to eq(0.4)
+    end
+
+    # Проверяется, в отличие от параметров сэмплинга: там границы знает
+    # сервер и он же отвергнет негодное, здесь спорить не с кем. Ноль
+    # означал бы «сворачивать каждый ход», в том числе на пустой истории;
+    # мусор через to_f стал бы тем же нулём молча (прецедент: --policy asl).
+    it "падает на негодном значении" do
+      ["abc", "0", "-0.5", "1.5", ""].each do |value|
+        expect { described_class.new({ compact_at: value }, env: {}).compact_at }
+          .to raise_error(MiniAgent::ConfigError, /порог сворачивания/)
+      end
+    end
+
+    it "принимает единицу как крайний случай" do
+      expect(described_class.new({ compact_at: "1" }, env: {}).compact_at).to eq(1.0)
+    end
+  end
+
+  # Своих умолчаний у параметров сэмплинга нет: они живут на сервере.
+  # Общий fetch на них падает намеренно — код, спросивший температуру
+  # обычным путём, обязан ломаться громко, а не получать выдуманное число.
+  describe "#given" do
+    it "отдаёт заданное человеком" do
+      expect(described_class.new({ temperature: 0.3 }, env: {}).given(:temperature)).to eq(0.3)
+    end
+
+    it "отдаёт nil, когда не задано ничего" do
+      expect(described_class.new({}, env: {}).given(:temperature)).to be_nil
+    end
+
+    it "не теряет явное false" do
+      config = described_class.new({ allow_unsafe: false }, env: { "ALLOW_UNSAFE" => "true" })
+
+      expect(config.given(:allow_unsafe)).to be(false)
     end
   end
 

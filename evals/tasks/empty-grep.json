@@ -1,0 +1,15 @@
+{
+  "about": "Искать нечего. Замеченный отказ: модель уходит в рассуждения и повторяет поиск, вместо того чтобы сказать «нет».",
+  "name": "empty-grep",
+  "prompt": "Найди в этом проекте, где определён метод calculate_tax. Если его нет, так и скажи.",
+  "max_turns": 6,
+  "setup": [
+    "mkdir -p lib",
+    "printf 'class Greeter\\n  def hello\\n    puts \"привет\"\\n  end\\nend\\n' > lib/greeter.rb",
+    "printf 'class Counter\\n  def initialize\\n    @value = 0\\n  end\\nend\\n' > lib/counter.rb"
+  ],
+  "checks": [
+    "grep -qiE 'не найд|отсутств|не определ|не существ|нет ' ../answer.txt",
+    "test \"$(find . -type f | wc -l)\" -eq 2"
+  ]
+}

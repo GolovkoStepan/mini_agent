@@ -99,7 +99,11 @@ module MiniAgent
       Window.new(
         size: @config&.context_window,
         prompt_tokens: tokens,
-        max_tokens: @config&.max_tokens.to_i
+        max_tokens: @config&.max_tokens.to_i,
+        # Без настроек берётся умолчание самого Window: отчёт умеет считаться
+        # и без Config (так его зовёт AutoCompactor для сравнения «до/после»),
+        # и порог там ни на что не влияет.
+        warn_at: @config&.compact_at || Window::WARN_AT
       )
     end
 

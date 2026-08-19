@@ -1,0 +1,11 @@
+{
+  "about": "Создание файла с нуля. Через heredoc в bash это ломалось молча — проверка запускает написанное, а не смотрит на него.",
+  "name": "write-new",
+  "prompt": "Создай файл lib/counter.rb с классом Counter: метод increment увеличивает счётчик на единицу, метод value возвращает текущее значение. Начальное значение — ноль.",
+  "max_turns": 8,
+  "setup": ["mkdir -p lib"],
+  "checks": [
+    "ruby -c lib/counter.rb",
+    "ruby -Ilib -rcounter -e 'c = Counter.new; c.increment; c.increment; exit(c.value == 2 ? 0 : 1)'"
+  ]
+}

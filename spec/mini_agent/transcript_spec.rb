@@ -79,6 +79,29 @@ RSpec.describe MiniAgent::Transcript do
 
       expect(File.read(path)).not_to include("секретный-ключ")
     end
+
+    # По журналу сравнивают прогоны между собой, а сэмплинг определяет, как
+    # модель отвечает: без него два лога с разными настройками выглядят
+    # одинаково.
+    it "пишет параметры сэмплинга" do
+      config = MiniAgent::Config.new({ temperature: 0.3, top_k: 50 }, env: {})
+      log = described_class.new(path)
+      log.session(config)
+      log.close
+
+      expect(records.first["sampling"]).to eq({ "temperature" => 0.3, "top_k" => 50 })
+    end
+
+    # Пустой объект, а не отсутствие ключа: без записи «ничего не задавали»
+    # неотличимо от журнала, снятого версией агента, которая о сэмплинге
+    # ещё не знала, — а это и есть та разница, ради которой поле заведено.
+    it "пишет пустой сэмплинг, когда не задано ничего" do
+      log = described_class.new(path)
+      log.session(MiniAgent::Config.new({}, env: {}))
+      log.close
+
+      expect(records.first["sampling"]).to eq({})
+    end
   end
 
   describe "устойчивость" do
@@ -147,6 +170,32 @@ RSpec.describe MiniAgent::Transcript do
       expect(records.map { |r| r["type"] }).to eq(%w[message compact message])
       expect(records.first["content"]).to eq("почини тесты")
       expect(records[1]["before"]).to eq(1500)
+    end
+  end
+
+  # Одобренный план заменяет собой историю исследования — как резюме
+  # при сворачивании, только написанное моделью и утверждённое человеком.
+  # Без отметки лог выглядел бы так, будто модель посреди работы забыла
+  # всё, что успела изучить.
+  describe "одобрение плана" do
+    it "отмечает сброс контекста вместе с путём к файлу" do
+      log = described_class.new(path)
+      log.message({ role: "user", content: "как добавить X?" })
+      log.plan(before: 12, path: "/tmp/plans/план.md")
+      log.close
+
+      expect(records.map { |r| r["type"] }).to eq(%w[message plan])
+      expect(records.last).to include("before" => 12, "path" => "/tmp/plans/план.md")
+    end
+
+    # Файл мог не записаться: права на каталог, полный диск. Работа при этом
+    # продолжается, и отметка о сбросе нужна ровно так же.
+    it "обходится без пути, когда файл не записался" do
+      log = described_class.new(path)
+      log.plan(before: 12)
+      log.close
+
+      expect(records.first["path"]).to be_nil
     end
   end
 

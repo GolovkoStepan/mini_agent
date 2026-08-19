@@ -1,33 +1,49 @@
 # frozen_string_literal: true
 
+require "tmpdir"
+
 RSpec.describe MiniAgent::Planner do
+  around do |example|
+    Dir.mktmpdir { |dir| @dir = dir and example.run }
+  end
+
   let(:out) { StringIO.new }
   let(:ui) { MiniAgent::UI.new(out: out, tty: false) }
   let(:plan_mode) { MiniAgent::PlanMode.new(enabled: true) }
   let(:conversation) { MiniAgent::History.new.build }
+  # Свой каталог на каждый пример: иначе спека писала бы планы в настоящий
+  # ~/.mini_agent/plans разработчика.
+  let(:store) { MiniAgent::PlanStore.new(dir: @dir) }
 
   # Агент-заглушка: планирование идёт обычным циклом ходов, и подменять надо
   # именно его. answers задаёт, чем кончится каждая задача, tasks собирает то,
-  # что уходило модели.
+  # что уходило модели. conversations — то, В КАКОЙ истории каждая задача шла:
+  # одобрение плана обязано начать новую, и проверить это можно только так.
   let(:agent) do
     Class.new do
-      attr_reader :tasks, :answer
+      attr_reader :tasks, :answer, :conversations, :transcript
 
       def initialize(*answers)
         @answers = answers
         @tasks = []
+        @conversations = []
       end
 
       def run(task, conversation: nil)
         @tasks << task
+        @conversations << conversation
         @answer = @answers.shift
         conversation
       end
+
+      # То же, что History#build у настоящего агента: новая история взамен
+      # прежней. Здесь достаточно любого другого объекта.
+      def new_conversation = MiniAgent::History.new.build
     end
   end
 
   def planner(agent_double, prompt: MiniAgent::Prompt::AutoDeny.new)
-    described_class.new(agent: agent_double, plan_mode: plan_mode, ui: ui, prompt: prompt)
+    described_class.new(agent: agent_double, plan_mode: plan_mode, ui: ui, prompt: prompt, store: store)
   end
 
   describe "план получен" do
@@ -73,6 +89,76 @@ RSpec.describe MiniAgent::Planner do
 
       expect(runner.tasks.length).to eq(2)
       expect(runner.tasks.last).to include("1. Прочитать. 2. Написать.", "approved")
+    end
+
+    # План и есть резюме исследования: десятки выводов ls и cat, на которых
+    # он построен, дальше только занимают окно. Проверяется тождество
+    # объекта — тот же признак, по которому Compactor отличает «свернули»
+    # от «ничего не менялось».
+    it "выполняет план в новой истории, а не в истории исследования" do
+      runner = agent.new("план", "сделано")
+      approved(runner)
+
+      expect(runner.conversations.first).to be(conversation)
+      expect(runner.conversations.last).not_to be(conversation)
+      expect(out.string).to include("Контекст исследования сброшен")
+    end
+
+    # Сброс без отметки в журнале выглядел бы так, будто модель посреди
+    # работы забыла всё изученное. Записывается ПЕРЕД сборкой новой истории,
+    # иначе отметка оказалась бы внутри неё — тот же порядок, что у compact.
+    it "отмечает сброс в журнале" do
+      log = instance_spy(MiniAgent::Transcript)
+      runner = agent.new("план", "сделано")
+      allow(runner).to receive(:transcript).and_return(log)
+
+      approved(runner)
+
+      expect(log).to have_received(:plan).with(before: conversation.size, path: a_string_including(@dir))
+    end
+  end
+
+  describe "план в файле" do
+    # Файл пишется ДО вопроса: «нет» означает «не выполнять», а не
+    # «выбросить». Уточняют план как раз после отказа, и сравнить его
+    # с предыдущим можно только по файлу.
+    it "сохраняет план даже при отказе выполнять" do
+      planner(agent.new("1. Прочитать.")).call("как добавить X?", conversation)
+
+      saved = Dir.children(@dir)
+      expect(saved.length).to eq(1)
+      expect(File.read(File.join(@dir, saved.first))).to include("1. Прочитать.")
+      expect(out.string).to include("План сохранён")
+    end
+
+    # Незаписанный файл сессию не рушит: план уже составлен, и терять из-за
+    # прав на каталог целую работу незачем.
+    it "предупреждает и продолжает, когда файл не записался" do
+      broken = MiniAgent::PlanStore.new(dir: File.join(@dir, "нет", "ещё"))
+      allow(broken).to receive(:save).and_return(nil)
+      allow(broken).to receive(:error).and_return("Permission denied")
+      described_class.new(agent: agent.new("план"), plan_mode: plan_mode, ui: ui,
+                          prompt: MiniAgent::Prompt::AutoDeny.new, store: broken)
+                     .call("как добавить X?", conversation)
+
+      expect(out.string).to include("Не удалось сохранить план", "Permission denied")
+      expect(plan_mode.plan).to eq("план")
+    end
+  end
+
+  # Разовый запуск (--plan): план сохраняется и печатается, вопроса нет
+  # и выполнения нет. Спрашивать некого — интерактивного режима здесь нет.
+  describe "без подтверждения" do
+    it "сохраняет план и ничего не выполняет" do
+      prompt = instance_spy(MiniAgent::Prompt)
+      runner = agent.new("план")
+      described_class.new(agent: runner, plan_mode: plan_mode, ui: ui, prompt: prompt, store: store)
+                     .call("как добавить X?", nil, confirm: false)
+
+      expect(prompt).not_to have_received(:confirm?)
+      expect(runner.tasks.length).to eq(1)
+      expect(Dir.children(@dir).length).to eq(1)
+      expect(out.string).to include("План сохранён", "План не выполнялся")
     end
   end
 

@@ -81,6 +81,25 @@ RSpec.describe MiniAgent::SlashCommands do
 
       expect(out.string).to include("неизвестно (--context-window)")
     end
+
+    # Сэмплинг задаётся при запуске, определяет поведение модели дальше и
+    # ровно поэтому забывается к середине диалога — как модель и политика.
+    it "показывает заданные параметры сэмплинга" do
+      settings = MiniAgent::Config.new({ temperature: 0.3, top_k: 50 }, env: {})
+
+      described_class.new(config: settings, tools: tools, ui: ui).call("/model")
+
+      expect(out.string).to include("temperature=0.3", "top_k=50")
+    end
+
+    # Отсутствие параметров — не «по умолчанию ноль», а «решает сервер».
+    # Вопрос «какая же тогда температура» возникает сразу, и ответ на него
+    # стоит в той же строке.
+    it "говорит про пресет сервера, когда не задано ничего" do
+      commands.call("/model")
+
+      expect(out.string).to include("пресет сервера")
+    end
   end
 
   describe "/tools" do

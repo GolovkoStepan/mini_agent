@@ -12,7 +12,8 @@ module MiniAgent
       @history = history
       @prompt = prompt
       @plan_mode = plan_mode
-      @tool_runner = ToolCallRunner.new(tools: tools, ui: ui)
+      @tool_runner = ToolCallRunner.new(tools: tools, ui: ui, config: config)
+      @anchor = TaskAnchor.new(config: config, usage: history.usage)
       # Подменяем в тестах: иначе проверка цикла ходов требовала бы настоящего
       # переполнения окна, то есть настоящего сервера с настоящим usage.
       @auto_compactor = auto_compactor || AutoCompactor.new(
@@ -25,6 +26,12 @@ module MiniAgent
     # «контекст сейчас». Разведи их — и сброс уходил бы в один объект,
     # а /context показывал бы другой.
     def usage = @history.usage
+
+    # Журнал сессии либо nil. Открыт наружу ради Planner, как usage —
+    # ради /usage: одобрение плана выбрасывает историю исследования, и это
+    # событие обязано попасть в лог, иначе по нему выйдет, что модель
+    # ни с того ни с сего забыла всё изученное.
+    def transcript = @history.transcript
 
     # Режим планирования. Открыт наружу ради Repl — по той же причине, по
     # которой ему открыт new_conversation: тот же объект нужен и агенту
@@ -69,8 +76,9 @@ module MiniAgent
     # его выполнять. Живёт здесь по той же причине, что и init: работа идёт
     # обычным циклом ходов, а Prompt у агента уже есть. Сам разговор — в
     # Planner.
-    def plan(task, conversation)
-      Planner.new(agent: self, plan_mode: @plan_mode, ui: @ui, prompt: @prompt).call(task, conversation)
+    def plan(task, conversation, confirm: true)
+      Planner.new(agent: self, plan_mode: @plan_mode, ui: @ui, prompt: @prompt, config: @config)
+             .call(task, conversation, confirm: confirm)
     end
 
     # Возвращает Conversation целиком, а не текст последнего ответа: именно
@@ -108,7 +116,7 @@ module MiniAgent
       conversation.user(Messages::PLAN_INSTRUCTION) if user_message && @plan_mode.on?
       conversation.user(user_message) if user_message
 
-      turns(conversation, mark)
+      turns(conversation, mark, user_message)
     end
 
     # Чем кончилась последняя задача: :ok, :failed (запрос к модели не удался)
@@ -134,13 +142,13 @@ module MiniAgent
       @compactor ||= Compactor.new(client: @client, history: @history, ui: @ui, usage: usage)
     end
 
-    def turns(conversation, mark)
+    def turns(conversation, mark, task = nil)
       @config.max_turns.times do |index|
         # Перед выставлением номера хода, а не после: Compactor гасит строку
         # состояния в своём ensure, и поставленный раньше номер исчез бы
         # с экрана вместе с ней. Первый ход пропускается: про него уже
         # спросили в run, до того как задача попала в историю.
-        conversation, mark = compacted(conversation, mark) unless index.zero?
+        conversation, mark = prepared(conversation, mark, task) unless index.zero?
 
         # Номер хода виден только в спиннере и стирается вместе с ним:
         # в логе работы эта бухгалтерия не нужна.
@@ -176,14 +184,21 @@ module MiniAgent
       conversation
     end
 
-    # Свернуть диалог, если окно кончается. Отметка отката берётся заново:
-    # прежняя указывает в историю, которой больше нет, и rollback по ней
-    # молча ничего бы не снял (число снятого вышло бы отрицательным).
-    def compacted(conversation, mark)
+    # Что делается с историей перед ходом: свернуть, если окно кончается,
+    # и напомнить задачу, если оно всё равно тесное.
+    #
+    # Свернувшись, история сменила объект — отметка отката берётся заново:
+    # прежняя указывает в ту, которой больше нет, и rollback по ней молча
+    # ничего бы не снял (число снятого вышло бы отрицательным).
+    #
+    # Якорь ставится ПОСЛЕ сворачивания, а не до: то стоит на том же пороге
+    # и, свернув, делает заполнение неизмеримым — якорь ход пропустит,
+    # и правильно сделает, потому что задача лежит в свежем резюме.
+    def prepared(conversation, mark, task)
       fresh = @auto_compactor.call(conversation)
-      return [conversation, mark] if fresh.equal?(conversation)
-
-      [fresh, fresh.mark]
+      mark = fresh.mark unless fresh.equal?(conversation)
+      @anchor.call(fresh, task)
+      [fresh, mark]
     end
 
     def run_tools(conversation, content, tool_calls, usage, finish_reason)

@@ -48,6 +48,15 @@ module MiniAgent
     def self.expand: (untyped value) -> String?
   end
 
+  class Lookup
+    def initialize: (Hash[Symbol, untyped] options, Hash[String, String] env,
+                     defaults: Hash[Symbol, untyped], keys: Hash[Symbol, String]) -> void
+    def given: (Symbol key) -> untyped
+    def given?: (Symbol key) -> bool
+    def fetch: (Symbol key) -> untyped
+    def bool: (Symbol key) -> bool
+  end
+
   class Config
     DEFAULTS: Hash[Symbol, untyped]
     ENV_KEYS: Hash[Symbol, String]
@@ -68,20 +77,31 @@ module MiniAgent
     def max_tokens: () -> Integer
     def allow_unsafe?: () -> bool
     def plan?: () -> bool
+    def markdown?: () -> bool
     def stream?: () -> bool
     def auto_compact?: () -> bool
+    def compact_at: () -> Float
+    def max_tokens_derived?: () -> bool
     def chat_uri: () -> URI::Generic
     def models_uri: () -> URI::Generic
     def cwd: () -> String?
     def log: () -> String?
     def use_ssl?: () -> bool
+    def sampling: () -> Hash[Symbol, (Integer | Float)]
+    def given: (Symbol key) -> untyped
+  end
+
+  class Sampling
+    KEYS: Hash[Symbol, Symbol]
+
+    def initialize: (Config config) -> void
+    def to_h: () -> Hash[Symbol, (Integer | Float)]
   end
 
   class ProjectContext
     FILENAMES: Array[String]
     MAX_CHARS: Integer
     SHARE: Float
-    CHARS_PER_TOKEN: Float
 
     attr_reader kept: Integer?
     attr_reader total: Integer?
@@ -115,6 +135,7 @@ module MiniAgent
     def reasoning: (String? text) -> void
     def rollback: (Integer count) -> void
     def compact: (before: Integer) -> void
+    def plan: (before: Integer, ?path: String?) -> void
     def close: () -> void
   end
 
@@ -150,11 +171,12 @@ module MiniAgent
 
   class Window
     WARN_AT: Float
+    CHARS_PER_TOKEN: Float
 
     attr_reader size: Integer?
     attr_reader max_tokens: Integer
 
-    def initialize: (size: Integer?, ?prompt_tokens: Integer?, ?max_tokens: Integer) -> void
+    def initialize: (size: Integer?, ?prompt_tokens: Integer?, ?max_tokens: Integer, ?warn_at: Float) -> void
     def known?: () -> bool
     def measurable?: () -> bool
     def prompt_tokens: () -> Integer
@@ -201,14 +223,31 @@ module MiniAgent
     def call: (Conversation conversation) -> Conversation
   end
 
+  class TaskAnchor
+    def initialize: (config: Config, ?usage: Usage?) -> void
+    def call: (Conversation conversation, String? task) -> bool
+  end
+
   class Initializer
     def initialize: (agent: Agent, config: Config, ui: UI, ?prompt: Prompt?) -> void
     def call: (Conversation conversation) -> Conversation
   end
 
   class Planner
-    def initialize: (agent: Agent, plan_mode: PlanMode, ui: UI, ?prompt: Prompt?) -> void
-    def call: (String task, Conversation conversation) -> Conversation
+    def initialize: (agent: Agent, plan_mode: PlanMode, ui: UI, ?prompt: Prompt?, ?store: PlanStore?, ?config: Config?) -> void
+    def call: (String task, Conversation? conversation, ?confirm: bool) -> Conversation?
+  end
+
+  class PlanStore
+    DIR: String
+    SLUG_LIMIT: Integer
+    ALLOWED: Regexp
+    FALLBACK_SLUG: String
+
+    attr_reader error: String?
+
+    def initialize: (?dir: String, ?clock: untyped) -> void
+    def save: (String plan, task: String, ?config: Config?) -> String?
   end
 
   class ProcessRunner
@@ -255,7 +294,7 @@ module MiniAgent
     def on?: () -> bool
     def enable: () -> self
     def disable: () -> self
-    def allows?: (String command) -> bool
+    def permits?: (read_only: bool) -> bool
   end
 
   class CommandGuard
@@ -267,6 +306,7 @@ module MiniAgent
     def initialize: (?policy: Symbol, ?prompt: untyped, ?ui: UI?, ?plan_mode: PlanMode) -> void
     def self.dangerous?: (String command) -> bool
     def verdict: (String command) -> verdict
+    def verdict_for: (String action, read_only: bool) -> verdict
   end
 
   module Tools
@@ -278,6 +318,36 @@ module MiniAgent
       def name: () -> String
       def schema: () -> json_object
       def call: (json_object arguments) -> String
+    end
+
+    class FileTool
+      def initialize: (guard: CommandGuard, ?cwd: String?) -> void
+      def call: (json_object arguments) -> String
+    end
+
+    class ReadFile < FileTool
+      NAME: String
+      MAX_BYTES: Integer
+      SCHEMA: json_object
+
+      def name: () -> String
+      def schema: () -> json_object
+    end
+
+    class WriteFile < FileTool
+      NAME: String
+      SCHEMA: json_object
+
+      def name: () -> String
+      def schema: () -> json_object
+    end
+
+    class EditFile < FileTool
+      NAME: String
+      SCHEMA: json_object
+
+      def name: () -> String
+      def schema: () -> json_object
     end
   end
 
@@ -300,7 +370,7 @@ module MiniAgent
     INDENT: String
     SPINNER_INTERVAL: Float
 
-    def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric, ?spinner_width: Integer?) -> void
+    def initialize: (?out: IO, ?tty: bool?, ?spinner_interval: Numeric, ?width: Integer?, ?markdown: bool) -> void
     def tty?: () -> bool
     def status=: (String? text) -> void
     def progress=: (String? text) -> void
@@ -321,10 +391,45 @@ module MiniAgent
     def with_spinner: [T] () { () -> T } -> T
   end
 
+  module Terminal
+    DEFAULT_WIDTH: Integer
+
+    def self.width: () -> Integer
+  end
+
+  class TextWrap
+    type segment = [String, Symbol?]
+
+    MIN_WIDTH: Integer
+
+    def initialize: (paint: ^(String, *Symbol) -> String, indent: String, ?width: Integer?) -> void
+    def call: (Array[segment] segments, ?hang: String) -> String
+  end
+
+  class Markdown
+    INDENT: String
+    MARKER: String
+    FENCE: Regexp
+    HEADING: Regexp
+    BULLET: Regexp
+    NUMBERED: Regexp
+    INLINE: Array[[Regexp, Symbol]]
+
+    def initialize: (?paint: (^(String, *Symbol) -> String)?, ?width: Integer?) -> void
+    def feed: (String? chunk) -> String
+    def flush: () -> String
+    def render: (String? text) -> String
+
+    class Plain
+      def feed: (String? chunk) -> String
+      def flush: () -> String
+      def render: (String? text) -> String
+    end
+  end
+
   class Spinner
     FRAMES: Array[String]
     INTERVAL: Float
-    DEFAULT_WIDTH: Integer
     MIN_TICKER: Integer
     TICKER_SEPARATOR: String
 
@@ -338,8 +443,6 @@ module MiniAgent
   end
 
   class ChatPayload
-    TEMPERATURE: Float
-
     def initialize: (config: Config, messages: Array[message], ?tools: Array[json_object], ?tool_choice: String) -> void
     def to_json: (*untyped) -> String
   end
@@ -421,12 +524,13 @@ module MiniAgent
 
   class ToolCallRunner
     MAX_TOOL_OUTPUT: Integer
+    SHARE: Float
     REPEAT_LIMIT: Integer
     LOOP_LIMIT: Integer
 
     type status = :ok | :loop
 
-    def initialize: (tools: ToolRegistry, ui: UI) -> void
+    def initialize: (tools: ToolRegistry, ui: UI, ?config: Config?) -> void
     def reset: () -> void
     def call: (Conversation conversation, tool_call tool_call) -> status
   end
@@ -442,10 +546,11 @@ module MiniAgent
     def new_conversation: () -> Conversation
     def compact: (Conversation conversation) -> Conversation
     def init: (Conversation conversation) -> Conversation
-    def plan: (String task, Conversation conversation) -> Conversation
+    def plan: (String task, Conversation? conversation, ?confirm: bool) -> Conversation?
     def run: (?String? user_message, ?conversation: Conversation?) -> Conversation
     def failed?: () -> bool
     def usage: () -> Usage
+    def transcript: () -> Transcript?
   end
 
   class AgentBuilder

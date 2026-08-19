@@ -36,14 +36,6 @@ module MiniAgent
     # ужаться, иначе они вдвоём вытеснят работу, ради которой агент запущен.
     SHARE = (1 - Config::WINDOW_SHARE) / 2
 
-    # Знаков на токен — оценка снизу, а не средняя. Направление ошибки здесь
-    # важнее её величины: недооценив, мы обрежем лишнее (видно по пометке
-    # и лечится правкой файла), переоценив — соберём промпт, который не влезает
-    # в окно, и тогда падает каждый запрос, а /clear не спасает, потому что
-    # описание попадает и в новую историю. Ровно этот случай нашла живая
-    # проверка 2026-08-02.
-    CHARS_PER_TOKEN = 2.5
-
     def self.load(dir = Dir.pwd, window: nil)
       new(dir, window: window).load
     end
@@ -107,7 +99,7 @@ module MiniAgent
     def window_limit
       return nil if @window.nil?
 
-      (@window * SHARE * CHARS_PER_TOKEN).to_i
+      (@window * SHARE * Window::CHARS_PER_TOKEN).to_i
     end
 
     def find

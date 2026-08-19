@@ -1,0 +1,16 @@
+{
+  "about": "Та же правка, что в edit-method, но окно заранее забито описанием проекта. Фантазёрство начиналось именно с ростом заполнения.",
+  "name": "big-context",
+  "prompt": "В файле lib/greeter.rb добавь в класс Greeter метод bye, печатающий строку «пока». Ничего другого не меняй.",
+  "max_turns": 8,
+  "setup": [
+    "mkdir -p lib",
+    "printf 'class Greeter\\n  def hello\\n    puts \"привет\"\\n  end\\nend\\n' > lib/greeter.rb",
+    "for i in $(seq 1 300); do printf '## Раздел %s\\n\\nЗдесь нет ничего важного: этот текст нужен только чтобы занять контекстное окно.\\n\\n' \"$i\"; done > AGENTS.md"
+  ],
+  "checks": [
+    "ruby -c lib/greeter.rb",
+    "grep -q 'def hello' lib/greeter.rb",
+    "ruby -Ilib -rgreeter -e 'Greeter.new.bye' | grep -q 'пока'"
+  ]
+}

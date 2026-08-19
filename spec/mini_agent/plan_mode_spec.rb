@@ -12,40 +12,32 @@ RSpec.describe MiniAgent::PlanMode do
     expect(mode.disable.on?).to be(false)
   end
 
-  describe "#allows?" do
-    # Выключенный режим не имеет мнения о командах: всё решает политика.
+  describe "#permits?" do
+    # Выключенный режим не имеет мнения ни о чём: всё решает политика.
     it "разрешает всё, пока выключен" do
       mode = described_class.new
 
-      expect(mode.allows?("rm -rf /tmp/x")).to be(true)
+      expect(mode.permits?(read_only: false)).to be(true)
     end
 
     # Планирование — не «ничего не выполнять»: план по незнакомому проекту
     # нельзя составить, не прочитав его.
     it "разрешает чтение, когда включён" do
-      mode = described_class.new(enabled: true)
-
-      expect(mode.allows?("cat README.md")).to be(true)
-      expect(mode.allows?("git log --oneline")).to be(true)
+      expect(described_class.new(enabled: true).permits?(read_only: true)).to be(true)
     end
 
     it "отвергает всё остальное, когда включён" do
-      mode = described_class.new(enabled: true)
-
-      expect(mode.allows?("touch new.rb")).to be(false)
-      expect(mode.allows?("bundle exec rspec")).to be(false)
+      expect(described_class.new(enabled: true).permits?(read_only: false)).to be(false)
     end
 
-    # Свой список не заводится: ReadOnly уже отвечает на этот вопрос для
-    # политики ask. Обе формы измерены живьём — на исследовании двух
-    # репозиториев из 33 команд отвергнуто 6, из них 5 приходится на find.
-    # Обе названы модели в PLAN_INSTRUCTION, чтобы она не открывала их
-    # для себя отказами по ходу дела.
-    it "отвергает find и перенаправление, как и ReadOnly" do
+    # Спрашивается признак, а не команда: про инструмент чтения известно
+    # сразу, про команду приходится гадать. Само гадание — забота ReadOnly
+    # и того, кто его зовёт (CommandGuard), а не режима.
+    it "спрашивает признак, а не разбирает команду" do
       mode = described_class.new(enabled: true)
 
-      expect(mode.allows?("find . -type f")).to be(false)
-      expect(mode.allows?("cat README.md 2>/dev/null")).to be(false)
+      expect(mode.permits?(read_only: MiniAgent::ReadOnly.command?("cat README.md"))).to be(true)
+      expect(mode.permits?(read_only: MiniAgent::ReadOnly.command?("touch new.rb"))).to be(false)
     end
   end
 

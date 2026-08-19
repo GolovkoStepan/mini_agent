@@ -1,0 +1,15 @@
+{
+  "about": "Правка существующего файла: добавленное работает, прежнее цело. Отказ, который ловится, — рапорт о сделанном без записи.",
+  "name": "edit-method",
+  "prompt": "В файле lib/greeter.rb добавь в класс Greeter метод bye, печатающий строку «пока». Ничего другого не меняй.",
+  "max_turns": 8,
+  "setup": [
+    "mkdir -p lib",
+    "printf 'class Greeter\\n  def hello\\n    puts \"привет\"\\n  end\\nend\\n' > lib/greeter.rb"
+  ],
+  "checks": [
+    "ruby -c lib/greeter.rb",
+    "grep -q 'def hello' lib/greeter.rb",
+    "ruby -Ilib -rgreeter -e 'Greeter.new.bye' | grep -q 'пока'"
+  ]
+}

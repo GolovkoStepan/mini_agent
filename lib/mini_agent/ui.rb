@@ -38,15 +38,27 @@ module MiniAgent
 
     SPINNER_INTERVAL = Spinner::INTERVAL
 
-    # spinner_width задаётся только в тестах — тем же приёмом, что и
-    # spinner_interval: настоящую ширину спиннер спрашивает у терминала,
-    # и она разная на каждой машине, а бегущая строка режется по ней.
-    def initialize(out: $stdout, tty: nil, spinner_interval: SPINNER_INTERVAL, spinner_width: nil)
+    # width задаётся только в тестах — тем же приёмом, что и spinner_interval:
+    # настоящую ширину спрашивают у терминала, и она разная на каждой машине,
+    # а по ней режется и бегущая строка, и разметка. Параметр один на обоих
+    # потребителей: два способа узнать одно число разошлись бы при первой правке.
+    #
+    # Разметка выключается и флагом, и отсутствием терминала. Вне TTY она
+    # не просто не нужна — она вредна: буферизация до перевода строки поменяла
+    # бы разбивку перенаправленного в файл вывода. Тот же порядок, что
+    # у Color.paint: терминал перебивает флаг.
+    def initialize(out: $stdout, tty: nil, spinner_interval: SPINNER_INTERVAL, width: nil, markdown: true)
       @out = out
       @tty = tty.nil? ? out.respond_to?(:tty?) && out.tty? : tty
-      @spinner = Spinner.new(ui: self, enabled: @tty, interval: spinner_interval, width: spinner_width)
+      @spinner = Spinner.new(ui: self, enabled: @tty, interval: spinner_interval, width: width)
+      @markdown = if markdown && @tty
+                    Markdown.new(paint: method(:paint), width: width)
+                  else
+                    Markdown::Plain.new
+                  end
       @streaming = false
       @streamed = false
+      @line_open = false
     end
 
     # Строка состояния (например, «ход 2/10») и ход генерации. Передаются
@@ -82,7 +94,7 @@ module MiniAgent
     def assistant(content)
       return @streamed = false if @streamed
 
-      puts("\n#{paint(BULLET, :green)} #{content}")
+      puts("\n#{paint(BULLET, :green)} #{@markdown.render(content)}")
     end
 
     # Кусок ответа модели по мере генерации.
@@ -91,20 +103,19 @@ module MiniAgent
     # строку и затирал бы первые знаки ответа. Маркер печатается один раз —
     # у первого куска, дальше идёт голый текст, поэтому итоговый вид совпадает
     # с обычным assistant.
+    #
+    # С разметкой кусок часто не даёт на экран ничего: строка копится до
+    # перевода. Поэтому и спиннер, и маркер откладываются до первого настоящего
+    # текста — иначе анимация гасла бы, а на её месте оставалась пустота.
     def stream_chunk(text)
-      unless @streaming
-        stop_spinner
-        @streaming = true
-        print("\n#{paint(BULLET, :green)} ")
-      end
-
-      print(text)
+      emit_stream(@markdown.feed(text))
     end
 
     # Ответ закончился. Перевод строки печатается только если что-то шло:
     # на ответе из одних вызовов инструментов лишняя пустая строка разорвала
     # бы блок «● Bash(...)» пополам.
     def stream_finish
+      emit_stream(@markdown.flush)
       return unless @streaming
 
       @streaming = false
@@ -113,7 +124,9 @@ module MiniAgent
       # же вызовом, иначе следующий ответ (например, из непотокового
       # /compact) молча пропал бы.
       @streamed = true
-      puts("")
+      # Рендерер отдаёт готовые строки вместе с переводом, и безусловный
+      # puts дорисовывал бы пустую строку под каждым размеченным ответом.
+      puts("") if @line_open
     end
 
     def warn(text)
@@ -131,14 +144,14 @@ module MiniAgent
     # Аргумент усекается: запись файла через heredoc — это вся будущая
     # начинка файла одной командой, и без ограничения она печаталась целиком.
     # В модель уходит полный текст в любом случае, здесь только экран.
+    # В скобках заголовка — то, к чему вызов относится: команда у bash, путь
+    # у файловых инструментов. JSON целиком остаётся запасным вариантом для
+    # инструмента, о котором мы ничего не знаем; у write_file он показал бы
+    # весь записываемый файл в экранированном виде — ровно тот шум, ради
+    # которого заведено усечение команды.
     def tool_call(name, arguments)
-      argument = if name == Tools::Bash::NAME && arguments["command"]
-                   arguments["command"]
-                 else
-                   arguments.to_json
-                 end
-
-      puts("\n#{paint(BULLET, :blue)} #{paint(name.capitalize, :bold)}(#{shorten(argument)})")
+      argument = arguments["command"] || arguments["path"] || arguments.to_json
+      puts("\n#{paint(BULLET, :blue)} #{paint(title(name), :bold)}(#{shorten(argument)})")
     end
 
     # Пользователю показываем усечённо — полный текст всё равно уходит модели.
@@ -187,6 +200,25 @@ module MiniAgent
     def stop_spinner = @spinner.stop
 
     private
+
+    # Показать то, что рендерер отдал на печать. Пусто — значит строка ещё
+    # не дописалась: ни спиннер гасить, ни маркер печатать не за чем.
+    def emit_stream(text)
+      return if text.empty?
+
+      unless @streaming
+        stop_spinner
+        @streaming = true
+        print("\n#{paint(BULLET, :green)} ")
+      end
+
+      print(text)
+      @line_open = !text.end_with?("\n")
+    end
+
+    # Имя инструмента для заголовка: write_file → WriteFile. capitalize
+    # оставлял бы «Write_file» — подчёркивание в заголовке выглядит опечаткой.
+    def title(name) = name.to_s.split("_").map(&:capitalize).join
 
     # Команда для заголовка: не длиннее COMMAND_LINES строк и COMMAND_CHARS
     # знаков. Отброшенное называется числом строк, а не многоточием: по нему

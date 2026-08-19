@@ -1,0 +1,9 @@
+{
+  "about": "Набор из MY_THINKS.md: с ним зацикливание рассуждений на глаз исчезло, а фантазёрство осталось. repeat_penalty понимают llama.cpp и LM Studio; на сервере с чистым протоколом OpenAI это поле игнорируется.",
+  "temperature": 0.3,
+  "top_p": 0.9,
+  "top_k": 50,
+  "min_p": 0.05,
+  "repeat_penalty": 1.12,
+  "presence_penalty": 0.05
+}

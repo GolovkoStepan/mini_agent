@@ -15,11 +15,22 @@ module MiniAgent
     SYSTEM_PROMPT = <<~PROMPT
       You are a coding agent. Your job is to help the user with programming tasks.
 
-      You have access to ONE tool: `bash` — which executes shell commands and returns stdout/stderr.
+      You have four tools:
+      - `bash` — run a shell command, get stdout/stderr back.
+      - `read_file` — get the contents of one file.
+      - `write_file` — create a file or replace it entirely.
+      - `edit_file` — replace one exact fragment of a file with another.
+
+      Use the file tools for files, and `bash` for everything else. Never write
+      a file with `cat > file`, a heredoc, `echo >>` or `tee`, and never edit
+      one with `sed -i`: the text would have to survive shell quoting, and a
+      shell that mangles it still exits 0, so a corrupted file looks like a
+      successful one. The file tools take the text as a plain argument and
+      report exactly what happened.
 
       Workflow:
       1. Plan what needs to be done.
-      2. Use `bash` to read files, run commands, write code, etc.
+      2. Explore with `bash` and `read_file`; change files with `write_file` and `edit_file`.
       3. After gathering enough information or completing the task, give your final answer in natural language.
       4. To finish, reply with a regular message (no tool call).
 
@@ -30,7 +41,16 @@ module MiniAgent
       `cd sub && ls`, not `cd sub` followed by `ls`. Use absolute paths when the
       target is far from the working directory.
 
-      Be concise. Explain what you're doing before each command.
+      Style:
+      - Answer immediately. No preamble, no sign-off, no closing summary.
+      - Never open with praise: not "Great question!", not "Happy to help!",
+        not "Absolutely!", not "You're right!". Do not compliment the user or
+        the idea. Start with the answer or the command.
+      - No emoji anywhere.
+      - Before each command, state in one sentence what it does.
+      - Report each result once. Do not restate what the output already shows.
+      - Say plainly when something failed or you don't know. Do not guess a
+        file path, a command name or an output you have not seen.
     PROMPT
 
     # Где агент работает. Приклеивается к системному промпту тем же способом,
@@ -105,6 +125,25 @@ module MiniAgent
     # Сообщение, которое подставляется в историю при достижении лимита ходов.
     STOP_MAX_TURNS = "Stop: maximum turns reached. Summarize current progress."
 
+    # Напоминание об исходной задаче на длинном диалоге (см. TaskAnchor).
+    # Уходит МОДЕЛИ, поэтому по-английски, как и всё остальное в промпте.
+    #
+    # Запрет назван поимённо — «не считай сделанным то, что не делал» — по
+    # тому же правилу, что уже записано для ENVIRONMENT и Tool::CANCELLED:
+    # общая формулировка вроде «be accurate» модели ни к чему не применяют,
+    # а именно ложный рапорт об успехе и есть то, ради чего якорь заведён.
+    TASK_ANCHOR = <<~PROMPT
+      Reminder. The task you are working on, in the user's own words:
+
+      <task>
+      %<task>s
+      </task>
+
+      Continue this task. Do not switch to a different one, do not answer
+      the output of the last command instead of the task, and do not report
+      anything as done that you have not actually done.
+    PROMPT
+
     # Просьба свернуть диалог (/compact) и оболочка для готового резюме.
     #
     # Обе строки уходят МОДЕЛИ, а не человеку, — как и STOP_MAX_TURNS выше,
@@ -147,8 +186,8 @@ module MiniAgent
       comments. Be specific and brief: this file is loaded into every session,
       so every line costs context. Skip what the code already makes obvious.
 
-      Write the file with a single bash heredoc, then read it back to confirm.
-      Do not print the whole file in your reply — say what you put in it.
+      Write the file with `write_file`, then read it back with `read_file` to
+      confirm. Do not print the whole file in your reply — say what you put in it.
     PROMPT
 
     # Режим планирования, сообщение МОДЕЛИ. Ставится перед задачей отдельным
@@ -167,11 +206,12 @@ module MiniAgent
       Planning mode is on. Investigate first, then answer with a plan.
       Do not carry the plan out: the user will be asked whether to run it.
 
-      Only commands that provably read are executed: ls, cat, head, tail, grep,
-      wc, file, git log, git status, git diff and the like. Everything else is
-      refused — including `find`, output redirection and the `2>/dev/null`
-      idiom. Use ls, grep and `git ls-files` instead. Do not look for a way
-      around a refusal: it comes from the mode, not from your command.
+      Only what provably reads runs: `read_file`, and shell commands like ls,
+      cat, head, tail, grep, wc, file, git log, git status, git diff. Everything
+      else is refused — `write_file`, `edit_file`, and also `find`, output
+      redirection and the `2>/dev/null` idiom. Use ls, grep and `git ls-files`
+      instead. Do not look for a way around a refusal: it comes from the mode,
+      not from your command.
 
       Answer with the plan itself: numbered steps, each naming the files it
       touches and the commands it runs. Say what you could not check and why.
@@ -226,24 +266,32 @@ module MiniAgent
     # Строки, которые получает МОДЕЛЬ, а не человек: результат инструмента и
     # сообщения об ошибках его вызова. Менять их — значит менять вход модели,
     # поэтому оформление здесь живёт отдельно от оформления терминала.
+    #
+    # Значков здесь нет намеренно. Системный промпт запрещает эмодзи, а эти
+    # строки ложатся модели в контекст на каждом отказе — то есть учили ровно
+    # обратному тому, о чём просит инструкция. Подражание тому, что лежит
+    # в контексте, у небольшой сети сильнее прямого указания: тот же урок,
+    # что с <project_context>, где разметка не удержала инъекцию. Слова при
+    # снятии значков не тронуты ни в одной строке — переформулировка
+    # воспроизвела бы грабли CANCELLED, где короткий отказ читался как успех.
     module Tool
-      EMPTY_COMMAND = "❌ Ошибка: пустая команда."
-      EXECUTION_TIMEOUT = "⏱️ Ошибка: превышено время ожидания (%<timeout>s сек)."
-      EXECUTION_FAILED = "❌ Ошибка выполнения: %<message>s"
+      EMPTY_COMMAND = "Ошибка: пустая команда."
+      EXECUTION_TIMEOUT = "Ошибка: превышено время ожидания (%<timeout>s сек)."
+      EXECUTION_FAILED = "Ошибка выполнения: %<message>s"
       # Отказ формулируется подробно, потому что короткого «отменено» модели
       # мало. Живая проверка при политике ask: команда `echo "мир" > b.txt`
       # отклонена, файла нет, а модель ответила «Файл b.txt создан» — прочла
       # отказ как успех. Раньше это почти не всплывало: отменяли только
       # опасные команды, то есть редко; при строгой политике отказ —
       # штатное событие, и ложный рапорт стал бы обычным делом.
-      CANCELLED = "⛔ Пользователь ОТКЛОНИЛ эту команду. Она НЕ выполнялась, " \
+      CANCELLED = "Пользователь ОТКЛОНИЛ эту команду. Она НЕ выполнялась, " \
                   "ничего не изменилось и не создано. Не утверждай, что действие " \
                   "выполнено. Сообщи пользователю, что команда отклонена, и жди указаний."
       # Повтор вызова. Приписка обязана объяснять себя по той же причине,
       # что и CANCELLED: на коротком «уже выполнялось» модель рапортует
       # о сделанном. Стоит ПЕРЕД результатом — длинный вывод отодвинул бы
       # её в хвост, куда модель может и не дочитать.
-      REPEATED = "🔁 Эта команда только что выполнялась с теми же аргументами. Повторно она " \
+      REPEATED = "Эта команда только что выполнялась с теми же аргументами. Повторно она " \
                  "НЕ выполнялась: результат ниже — прежний, и он не изменится, сколько бы раз " \
                  "команду ни повторить. Не вызывай её снова. Если этот результат не даёт нужного, " \
                  "смени подход: другая команда, другие аргументы, другой путь. Если задача " \
@@ -252,7 +300,7 @@ module MiniAgent
       # Третий повтор подряд: задача обрывается сразу, и эта строка модели
       # уже не показывается. Она нужна следующей задаче в интерактивном
       # режиме — история остаётся, и без ответа на вызов в ней была бы дыра.
-      LOOPED = "🔁 Эта команда вызвана третий раз подряд с теми же аргументами. Она не " \
+      LOOPED = "Эта команда вызвана третий раз подряд с теми же аргументами. Она не " \
                "выполнялась; задача остановлена."
       # Отказ режима планирования. Объясняется так же подробно, как CANCELLED,
       # и по той же причине — на коротком отказе модель рапортует о сделанном.
@@ -260,7 +308,7 @@ module MiniAgent
       # команду, здесь не выполняется целый класс команд, и следующая попытка
       # кончится тем же. Разведены поэтому: «попробуйте иначе» и «опишите это
       # шагом плана» — разные указания, и второе здесь единственно верное.
-      PLAN_REFUSED = "📋 Идёт планирование: команда НЕ выполнялась, ничего не изменилось " \
+      PLAN_REFUSED = "Идёт планирование: команда НЕ выполнялась, ничего не изменилось " \
                      "и не создано. В этом режиме выполняются только заведомо читающие " \
                      "команды (ls, cat, grep, git log и подобные), и обойти отказ нельзя — " \
                      "он относится к режиму, а не к этой команде. Место такой команды " \
@@ -272,6 +320,36 @@ module MiniAgent
       UNKNOWN_TOOL = "Ошибка: неизвестный инструмент '%<name>s'"
       TOOL_FAILED = "Ошибка вызова инструмента %<name>s: %<message>s"
       ARGS_PARSE_ERROR = "Ошибка разбора аргументов: %<message>s. Получено: %<raw>s"
+
+      # Файловые инструменты. Каждый отказ говорит, что ничего не изменилось,
+      # и называет следующий шаг — по граблям CANCELLED: короткое «не вышло»
+      # модель читает как «вышло» и рапортует о сделанном.
+      FILE_NO_PATH = "Ошибка: не указан путь (path). Ничего не прочитано и не записано."
+      FILE_FAILED = "Ошибка файловой операции: %<message>s. Ничего не изменилось."
+      FILE_MISSING = "Файла %<path>s не существует. Ничего не изменилось. Проверь путь " \
+                     "командой ls, прежде чем обращаться к нему снова."
+      FILE_IS_DIRECTORY = "%<path>s — это каталог, а не файл. Ничего не изменилось. " \
+                          "Посмотреть содержимое каталога можно командой ls."
+      FILE_TOO_BIG = "Файл %<path>s слишком велик: %<size>d байт при пределе %<limit>d. " \
+                     "Он не прочитан. Возьми нужную часть командой head, tail или grep."
+      FILE_EMPTY = "Файл %<path>s существует и пуст: в нём ноль байт."
+      FILE_NOT_TEXT = "Файл %<path>s не является текстом в UTF-8 и НЕ изменён: правка " \
+                      "двоичного файла испортила бы его. Ничего не записано."
+      DIR_MISSING = "Каталога %<path>s не существует, файл НЕ создан и ничего не изменилось. " \
+                    "Создай каталог командой mkdir -p, если он действительно нужен, " \
+                    "или проверь путь: в нём может быть опечатка."
+      FILE_CREATED = "Файл %<path>s создан: %<lines>s, %<chars>s."
+      FILE_REPLACED = "Файл %<path>s перезаписан целиком, прежнее содержимое потеряно: " \
+                      "%<lines>s, %<chars>s."
+      EDIT_NO_OLD_TEXT = "Ошибка: пустой old_text. Файл НЕ изменён. Укажи в old_text тот " \
+                         "кусок текста, который нужно заменить, дословно."
+      EDIT_NOT_FOUND = "Текст old_text не найден в %<path>s. Файл НЕ изменён. Сравнение " \
+                       "дословное, вместе с пробелами и переводами строк: прочитай файл " \
+                       "инструментом read_file и скопируй кусок оттуда."
+      EDIT_AMBIGUOUS = "Текст old_text встречается в %<path>s %<count>s — непонятно, " \
+                       "какое из вхождений заменять. Файл НЕ изменён. Добавь в old_text " \
+                       "соседние строки, чтобы кусок стал единственным."
+      EDIT_DONE = "Файл %<path>s изменён: заменённый кусок — %<removed>s, новый — %<added>s."
     end
 
     # Псевдонимы: слой разделён, но обращаться можно по-прежнему коротко.
@@ -303,6 +381,14 @@ module MiniAgent
     WRITING_COMMAND = "Команда не только читает: %<command>s"
     CONFIRM_PROMPT = "Продолжить выполнение? (y/N): "
     UNKNOWN_POLICY = "Неизвестная политика подтверждений: %<value>s. Возможные: %<known>s."
+    # Мусор в параметре сэмплинга роняет запуск, а не превращается в 0.0:
+    # эти числа определяют поведение модели, и работать с выдуманным вместо
+    # заданного — худший исход. Тот же выбор, что у неизвестной политики.
+    INVALID_SAMPLING = "Некорректное значение %<name>s: %<value>s. Ожидается число."
+    # Порог сворачивания проверяется, в отличие от сэмплинга: там границы
+    # знает сервер, а здесь спорить не с кем, и 0 означал бы сворачивание
+    # на каждом ходу, включая пустую историю.
+    INVALID_COMPACT_AT = "Некорректный порог сворачивания: %<value>s. Ожидается доля окна больше 0 и не больше 1."
 
     # --- Взаимодействие с LLM ---
     THINKING = "Думаю…"
@@ -345,6 +431,7 @@ module MiniAgent
     # что стоит внутри скобок и без пояснения читалась бы как часть команды.
     COMMAND_ELLIPSIS = "… ещё %<count>s команды"
     LINES = %w[строка строки строк].freeze
+    TIMES = %w[раз раза раз].freeze
     LLM_CONNECTION_FAILED = "Ошибка связи с LLM: %<message>s"
     # Соединение не открылось вообще — агент не стартовал. Показываем адрес
     # и способ его сменить: значение по умолчанию указывает на чужой сервер,
@@ -404,8 +491,21 @@ module MiniAgent
     OPT_LLM_TIMEOUT = "Ожидание ответа модели (сек)"
     OPT_STREAM = "Показывать ответ по мере генерации (по умолчанию включено)"
     OPT_AUTO_COMPACT = "Сворачивать диалог самостоятельно, когда кончается окно (по умолчанию включено)"
+    OPT_COMPACT_AT = "С какой доли занятого окна считать, что место кончилось (по умолчанию 0.75)"
+    OPT_MARKDOWN = "Размечать ответ модели в терминале (по умолчанию включено)"
     OPT_RETRY_COUNT = "Число попыток при ошибке сети"
     OPT_RETRY_DELAY = "Задержка между попытками (сек)"
+    # Про «пресет сервера» сказано в каждой строке намеренно: умолчание здесь
+    # не число, а чужое решение, и без этого флаг выглядит как «не задано —
+    # значит по умолчанию 0».
+    OPT_TEMPERATURE = "Температура сэмплинга (не задано — пресет сервера)"
+    OPT_TOP_P = "Top-P сэмплинг (не задано — пресет сервера)"
+    OPT_TOP_K = "Top-K сэмплинг (не задано — пресет сервера)"
+    OPT_MIN_P = "Min-P сэмплинг (не задано — пресет сервера)"
+    OPT_REPEAT_PENALTY = "Штраф за повтор, llama.cpp/LM Studio (нейтрально 1.0)"
+    OPT_PRESENCE_PENALTY = "Штраф за присутствие, OpenAI (нейтрально 0)"
+    OPT_FREQUENCY_PENALTY = "Штраф за частоту, OpenAI (нейтрально 0); это НЕ --repeat-penalty"
+    OPT_SEED = "Зерно генератора: одинаковое зерно даёт повторимый ответ"
     OPT_POLICY = "Когда спрашивать подтверждение: deny (только опасные), ask (всё, кроме чтения), unsafe (никогда)"
     OPT_ALLOW_UNSAFE = "То же, что --policy unsafe"
     OPT_BASE_URL = "Базовый URL LLM-сервера"
@@ -454,6 +554,16 @@ module MiniAgent
       ask: "ask — спрашивать про всё, кроме чтения",
       unsafe: "unsafe — не спрашивать вовсе"
     }.freeze
+    # Сэмплинг показывается там же, где модель и политика, и по той же
+    # причине: задаётся при запуске, определяет поведение модели дальше и
+    # ровно поэтому забывается к середине диалога. Именами протокола, а не
+    # переводом: искать их потом придётся в документации сервера.
+    CMD_SAMPLING_LINE = "Сэмплинг: %<params>s"
+    CMD_SAMPLING_PAIR = "%<name>s=%<value>s"
+    # Не «по умолчанию» и не пустая строка: параметров нет в запросе вовсе,
+    # и решает их сервер. Это ответ на вопрос «а какая же тогда температура»,
+    # который иначе задаётся сразу и остаётся без ответа.
+    CMD_SAMPLING_SERVER = "пресет сервера (агент ничего не задаёт)"
     CMD_TOOLS_HEADER = "Инструменты:"
     CMD_TOOL_LINE = "  %<name>s"
     CMD_USAGE_HEADER = "Токены за сессию:"
@@ -631,6 +741,22 @@ module MiniAgent
     # Разовый запуск с --plan: план напечатан и на этом всё. Без строки
     # ответ модели выглядит как отчёт о сделанном.
     PLAN_ONE_SHOT = "План не выполнялся: с --plan агент только предлагает порядок действий."
+    PLAN_SAVED = "План сохранён: %<path>s"
+    # Файл не записался — предупреждение, а не отказ: план уже составлен,
+    # и терять из-за прав на каталог целую работу незачем. Путь назван,
+    # потому что чинить придётся именно его.
+    PLAN_SAVE_FAILED = "Не удалось сохранить план (%<message>s). Он остаётся только на экране."
+    # Шапка файла плана. Задача и время — чтобы через неделю понять, к чему
+    # это относится; модель и каталог — по той же причине, что и в заголовке
+    # сессии журнала: план, составленный другой моделью в другом проекте,
+    # выглядит точно так же.
+    PLAN_FILE_TASK = "# %<task>s"
+    PLAN_FILE_TIME = "Дата: %<time>s"
+    PLAN_FILE_MODEL = "Модель: %<model>s"
+    PLAN_FILE_CWD = "Каталог: %<path>s"
+    # Сброс контекста после одобрения: числа названы, потому что иначе он
+    # выглядит как потеря работы, а не как её итог.
+    PLAN_CONTEXT_RESET = "Контекст исследования сброшен: %<before>s → план."
 
     CMD_UNKNOWN = "Неизвестная команда: /%<name>s. /help — список."
     # Ctrl+C прерывает задачу, а не сессию: история цела, можно продолжать.

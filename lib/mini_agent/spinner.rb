@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "io/console"
-
 module MiniAgent
   # Анимация ожидания в отдельном потоке.
   #
@@ -16,10 +14,6 @@ module MiniAgent
   class Spinner
     FRAMES = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
     INTERVAL = 0.1
-
-    # Ширина терминала, когда узнать её не вышло: вывод перенаправлен,
-    # ioctl не отвечает, окна нет вовсе.
-    DEFAULT_WIDTH = 80
 
     # Меньше этого места под бегущую строку не отводим. Обрывок в несколько
     # знаков не читается вовсе, а строку удлиняет.
@@ -137,15 +131,9 @@ module MiniAgent
     end
 
     # Ширина спрашивается на каждой отрисовке, а не запоминается: окно
-    # терминала меняют посреди работы, и запомненное даёт либо перенос
-    # строки, либо пустое место справа.
-    def width
-      return @width if @width
-
-      columns = IO.console&.winsize&.last.to_i
-      columns.positive? ? columns : DEFAULT_WIDTH
-    rescue StandardError
-      DEFAULT_WIDTH
-    end
+    # терминала меняют посреди работы. Само определение переехало в Terminal,
+    # когда за той же величиной пришёл рендерер разметки; @width остаётся
+    # тестовым крючком.
+    def width = @width || Terminal.width
   end
 end

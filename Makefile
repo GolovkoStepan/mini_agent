@@ -2,7 +2,7 @@
 # `make` без цели — полная проверка (тесты + линтер), как `rake` по умолчанию.
 
 .DEFAULT_GOAL := check
-.PHONY: help setup check spec lint lint-fix rbs run repl console build install uninstall clean
+.PHONY: help setup check spec lint lint-fix rbs run repl console evals build install uninstall clean
 
 BUNDLE ?= bundle exec
 GEM_VERSION := $(shell ruby -Ilib -rmini_agent/version -e 'print MiniAgent::VERSION')
@@ -13,6 +13,14 @@ GEM_FILE := mini_agent-$(GEM_VERSION).gem
 FILE ?=
 TASK ?=
 ARGS ?=
+
+# Аргументы стенда: TASKS/PRESETS — имена через запятую, RUNS — прогонов
+# на пару «задача × набор».
+TASKS ?=
+PRESETS ?=
+RUNS ?=
+EVAL_ARGS = $(if $(TASKS),--tasks $(TASKS)) $(if $(PRESETS),--presets $(PRESETS)) \
+	$(if $(RUNS),--runs $(RUNS))
 
 help: ## Список целей
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -47,6 +55,11 @@ repl: ## Интерактивный режим агента; [ARGS="--model ..."
 
 console: ## IRB с загруженным гемом
 	bin/console
+
+# Ходит к настоящей модели и идёт часами — в `make check` не входит намеренно.
+# ARGS после -- уходят агенту: ARGS="--model qwen3-coder".
+evals: ## Оценочные задачи; [TASKS=a,b] [PRESETS=server,tuned] [RUNS=5] [ARGS="..."]
+	$(BUNDLE) ruby evals/run.rb $(EVAL_ARGS) $(if $(ARGS),-- $(ARGS))
 
 build: ## Собрать гем
 	gem build mini_agent.gemspec

@@ -416,6 +416,73 @@ RSpec.describe MiniAgent::Agent do
     end
   end
 
+  # Задача сказана один раз и уезжает вверх истории: к двадцатому ходу между
+  # ней и запросом лежат десятки выводов команд, и модель отвечает уже им.
+  describe "якорь задачи" do
+    # Окно 8192 даёт max_tokens 4096: промпт в 7000 токенов означает
+    # занятость 11096 из 8192 — заведомо выше порога.
+    #
+    # Сворачивание выключено намеренно: оно стоит на том же пороге,
+    # срабатывает первым и обнуляет «контекст сейчас» — то есть якорь ход
+    # пропустит (это проверяется отдельно ниже). Каждый ход подряд якорь
+    # ставится там, где сворачивания нет или оно сдалось.
+    let(:config) do
+      MiniAgent::Config.new({ max_turns: 3, context_window: 8192, auto_compact: false }, env: {})
+    end
+    let(:tight) { { "prompt_tokens" => 7000, "completion_tokens" => 10, "total_tokens" => 7010 } }
+    let(:roomy) { { "prompt_tokens" => 100, "completion_tokens" => 10, "total_tokens" => 110 } }
+
+    def user_messages(conversation)
+      conversation.to_a.select { |m| m[:role] == "user" }.map { |m| m[:content] }
+    end
+
+    it "повторяет задачу перед ходом, когда окно тесное" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call], tight], ["готово", [], tight])
+
+      conversation = agent.run("почини тесты")
+
+      expect(user_messages(conversation).last).to include("почини тесты")
+    end
+
+    # На просторном окне якорь не ставится вовсе: сообщение на каждый ход
+    # через всю сессию там, где забывать ещё нечего, — это трата окна,
+    # ради экономии которого якорь и заведён.
+    it "молчит, пока места хватает" do
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call], roomy], ["готово", [], roomy])
+
+      conversation = agent.run("почини тесты")
+
+      expect(user_messages(conversation)).to eq(["почини тесты"])
+    end
+
+    # Первый ход пропускается вместе со сворачиванием: задача только что
+    # положена в историю последним сообщением, повторять её там нечем.
+    it "не ставит якорь на первом ходу" do
+      allow(client).to receive(:chat).and_return(["готово", [], tight])
+
+      conversation = agent.run("почини тесты")
+
+      expect(user_messages(conversation)).to eq(["почини тесты"])
+    end
+
+    # Ловушка порядка: якорь ставится ПОСЛЕ сворачивания. Поставленный до
+    # него, он попал бы в историю, которую резюме тут же выбрасывает, —
+    # то есть напоминание уходило бы в никуда ровно на том ходу, ради
+    # которого оно и заведено.
+    it "кладёт задачу в свежую историю, а не в выброшенную" do
+      auto = instance_double(MiniAgent::AutoCompactor)
+      folded = MiniAgent::History.new.build.tap { |c| c.user("Резюме диалога.") }
+      allow(auto).to receive(:call) { |given| given.equal?(folded) ? given : folded }
+      allow(client).to receive(:chat).and_return(["работаю", [tool_call], tight], ["готово", [], tight])
+      agent = described_class.new(config: config, client: client, tools: tools, ui: ui, auto_compactor: auto)
+
+      conversation = agent.run("почини тесты")
+
+      expect(conversation).to be(folded)
+      expect(user_messages(folded).last).to include("почини тесты")
+    end
+  end
+
   describe "прерывание по Ctrl+C" do
     # Interrupt не StandardError, поэтому rescue внутри цикла его не ловят
     # и он доходит до обработчика вокруг всего хода.

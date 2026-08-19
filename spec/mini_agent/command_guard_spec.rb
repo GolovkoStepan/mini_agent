@@ -159,6 +159,55 @@ RSpec.describe MiniAgent::CommandGuard do
     it "перебивает политику unsafe" do
       expect(guard(policy: :unsafe).verdict("rm -rf /tmp/x")).to be(:planning)
     end
+
+    # Границы наследуются от ReadOnly целиком, вместе с его отказами. Обе
+    # формы измерены живьём — на исследовании двух репозиториев из 33 команд
+    # отвергнуто 6, из них 5 приходится на find, — и обе названы модели
+    # в PLAN_INSTRUCTION, чтобы она не открывала их для себя отказами.
+    it "отвергает find и перенаправление, как и ReadOnly" do
+      expect(guard.verdict("find . -type f")).to be(:planning)
+      expect(guard.verdict("cat README.md 2>/dev/null")).to be(:planning)
+    end
+  end
+
+  # Файловые инструменты не разбираются в строке: они знают про себя, читают
+  # или пишут, и говорят это прямо. Ради этого разделение и заводилось.
+  describe "#verdict_for" do
+    def guard(policy: :deny, prompt: MiniAgent::Prompt::AutoApprove.new, planning: false)
+      described_class.new(policy: policy, prompt: prompt,
+                          plan_mode: MiniAgent::PlanMode.new(enabled: planning))
+    end
+
+    it "пропускает чтение в режиме планирования" do
+      expect(guard(planning: true).verdict_for("read_file README.md", read_only: true)).to be(:allow)
+    end
+
+    it "отвергает запись в режиме планирования, не спрашивая" do
+      prompt = instance_spy(MiniAgent::Prompt)
+
+      expect(guard(prompt: prompt, planning: true).verdict_for("write_file a.rb", read_only: false)).to be(:planning)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    it "спрашивает про запись при политике ask" do
+      prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+
+      expect(guard(policy: :ask, prompt: prompt).verdict_for("write_file a.rb", read_only: false)).to be(:cancelled)
+      expect(prompt).to have_received(:confirm?)
+    end
+
+    it "не спрашивает про чтение при политике ask" do
+      prompt = instance_spy(MiniAgent::Prompt)
+
+      expect(guard(policy: :ask, prompt: prompt).verdict_for("read_file a.rb", read_only: true)).to be(:allow)
+      expect(prompt).not_to have_received(:confirm?)
+    end
+
+    # Денилист разбирает команды, а здесь команды нет: rm -rf в имени файла
+    # ничего не удаляет, и спрашивать про него значило бы пугать зря.
+    it "не применяет денилист к пути" do
+      expect(guard(policy: :deny).verdict_for("write_file rm -rf.txt", read_only: false)).to be(:allow)
+    end
   end
 
   describe "#verdict при политике unsafe" do

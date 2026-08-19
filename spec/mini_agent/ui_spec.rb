@@ -38,6 +38,15 @@ RSpec.describe MiniAgent::UI do
       expect(out.string).to include('{"query":"ruby"}')
     end
 
+    # У write_file JSON целиком — это весь записываемый файл в экранированном
+    # виде: ровно тот шум, ради которого заведено усечение команды.
+    it "показывает путь у файловых инструментов, а не начинку файла" do
+      ui.tool_call("write_file", { "path" => "lib/a.rb", "content" => "class A\nend\n" })
+
+      expect(out.string).to include("● WriteFile(lib/a.rb)")
+      expect(out.string).not_to include("class A")
+    end
+
     # Запись файла через heredoc — это вся начинка файла одной командой.
     # Без ограничения 30 строк содержимого давали 33 строки заголовка;
     # у результата команды лимит был, у самой команды — нет.
@@ -338,6 +347,9 @@ RSpec.describe MiniAgent::UI do
 
       # Спиннер и текст ответа делят одну строку: без досрочной остановки
       # анимация затирала бы первые знаки.
+      #
+      # stream_finish здесь обязателен: с разметкой строка копится до перевода,
+      # и без завершения потока хвост так и остался бы в буфере рендерера.
       it "гасится досрочно и не мешает тексту" do
         before_count = Thread.list.size
 
@@ -345,10 +357,11 @@ RSpec.describe MiniAgent::UI do
           sleep 0.03
           ui.stop_spinner
           ui.stream_chunk("ответ")
+          ui.stream_finish
         end
 
         expect(Thread.list.size).to eq(before_count)
-        expect(out.string).to end_with("ответ")
+        expect(out.string).to end_with("ответ\n")
       end
 
       it "переживает повторную остановку" do
@@ -361,7 +374,7 @@ RSpec.describe MiniAgent::UI do
       # «чем именно». На живой задаче счётчик доходил до 25 000 знаков,
       # и всё это время о содержании работы не было известно ничего.
       describe "бегущая строка" do
-        subject(:ui) { described_class.new(out: out, tty: true, spinner_interval: 0.01, spinner_width: 80) }
+        subject(:ui) { described_class.new(out: out, tty: true, spinner_interval: 0.01, width: 80) }
 
         it "показывает текст размышлений" do
           ui.ticker = "проверяю файл agent.rb"
@@ -404,7 +417,7 @@ RSpec.describe MiniAgent::UI do
         # На узком терминале обрывок в несколько знаков не читается, а место
         # отнимает у счётчика — там бегущая строка пропадает целиком.
         it "пропадает, когда места не осталось" do
-          narrow = described_class.new(out: out, tty: true, spinner_interval: 0.01, spinner_width: 30)
+          narrow = described_class.new(out: out, tty: true, spinner_interval: 0.01, width: 30)
           narrow.status = "ход 2/10"
           narrow.ticker = "мысль"
           narrow.with_spinner { sleep 0.05 }
@@ -464,6 +477,58 @@ RSpec.describe MiniAgent::UI do
       ui.stream_finish
 
       expect(out.string).to eq("")
+    end
+  end
+
+  describe "разметка ответа" do
+    subject(:ui) { described_class.new(out: out, tty: true, spinner_interval: 0.01, width: 40) }
+
+    let(:answer) do
+      "# Отчёт\nНашёл **три** ошибки в `agent.rb` и ещё несколько мелких замечаний.\n\n- первое\n- второе"
+    end
+
+    it "размечает ответ модели" do
+      ui.assistant("текст с **важным** словом")
+
+      expect(out.string).to include("\e[1mважным\e[0m")
+      expect(out.string).not_to include("**")
+    end
+
+    # Ради этого весь рендерер и построен построчно: способ доставки ответа
+    # на его вид влиять не должен.
+    it "даёт на потоке тот же вид, что и целиком" do
+      answer.each_char { |char| ui.stream_chunk(char) }
+      ui.stream_finish
+      streamed = out.string
+
+      out.truncate(out.rewind)
+      described_class.new(out: out, tty: true, spinner_interval: 0.01, width: 40).assistant(answer)
+
+      expect(streamed).to eq(out.string)
+    end
+
+    # Вывод команды — данные от машины: звёздочка в выводе ls не курсив,
+    # а решётка в начале строки не заголовок.
+    it "не трогает вывод инструмента" do
+      ui.tool_result("Код выхода: 0\n**.rb\n# комментарий")
+
+      expect(out.string).to include("**.rb", "# комментарий")
+    end
+
+    # Вне терминала разметка не просто не нужна: буферизация до перевода
+    # строки поменяла бы разбивку перенаправленного в файл вывода.
+    it "молчит вне терминала, даже когда включена" do
+      plain = described_class.new(out: out, tty: false, markdown: true)
+      plain.stream_chunk("текст с **важным**")
+
+      expect(out.string).to end_with("текст с **важным**")
+    end
+
+    it "выключается флагом" do
+      off = described_class.new(out: out, tty: true, spinner_interval: 0.01, markdown: false)
+      off.assistant("текст с **важным** словом")
+
+      expect(out.string).to include("**важным**")
     end
   end
 end
