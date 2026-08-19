@@ -100,6 +100,25 @@ RSpec.describe MiniAgent::SlashCommands do
 
       expect(out.string).to include("пресет сервера")
     end
+
+    # Значения из файла ничем не выдают своего происхождения: без пути
+    # вопрос «почему модель не та» остаётся без видимого ответа.
+    it "называет файл настроек, когда он прочитан" do
+      file = MiniAgent::Settings.new({ model: "из-файла" }, path: "/тмп/settings.json")
+      settings = MiniAgent::Config.new({}, env: {}, settings: file)
+
+      described_class.new(config: settings, tools: tools, ui: ui).call("/model")
+
+      expect(out.string).to include("Настройки: /тмп/settings.json")
+    end
+
+    # Строка «настроек нет» сообщала бы об отсутствии того, о чём никто
+    # не спрашивал: файла у большинства нет вовсе, и это норма.
+    it "молчит о файле настроек, когда его не было" do
+      commands.call("/model")
+
+      expect(out.string).not_to include("Настройки:")
+    end
   end
 
   describe "/tools" do

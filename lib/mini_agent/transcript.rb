@@ -54,6 +54,11 @@ module MiniAgent
         model: config.model,
         base_url: config.base_url,
         sampling: config.sampling,
+        # Путь файла настроек, null — если файла не было. Пишется ВСЕГДА,
+        # по тому же доводу, что и пустой сэмплинг: без ключа «файла не было»
+        # неотличимо от журнала, снятого версией, которая про файл не знала.
+        # Содержимое не пишется: в файле может лежать api_key.
+        settings: config.settings_path,
         cwd: config.cwd || Dir.pwd
       )
     end

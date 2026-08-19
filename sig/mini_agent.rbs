@@ -50,7 +50,8 @@ module MiniAgent
 
   class Lookup
     def initialize: (Hash[Symbol, untyped] options, Hash[String, String] env,
-                     defaults: Hash[Symbol, untyped], keys: Hash[Symbol, String]) -> void
+                     defaults: Hash[Symbol, untyped], keys: Hash[Symbol, String],
+                     ?file: Hash[Symbol, untyped]) -> void
     def given: (Symbol key) -> untyped
     def given?: (Symbol key) -> bool
     def fetch: (Symbol key) -> untyped
@@ -72,8 +73,9 @@ module MiniAgent
     attr_reader llm_timeout: Float
     attr_reader policy: Symbol
     attr_accessor context_window: Integer?
+    attr_reader settings_path: String?
 
-    def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String]) -> void
+    def initialize: (?Hash[Symbol, untyped] options, ?env: Hash[String, String], ?settings: Settings) -> void
     def max_tokens: () -> Integer
     def allow_unsafe?: () -> bool
     def plan?: () -> bool
@@ -89,6 +91,18 @@ module MiniAgent
     def use_ssl?: () -> bool
     def sampling: () -> Hash[Symbol, (Integer | Float)]
     def given: (Symbol key) -> untyped
+  end
+
+  class Settings
+    PATH: String
+    NONE: Settings
+
+    attr_reader values: Hash[Symbol, untyped]
+    attr_reader path: String?
+
+    def initialize: (?Hash[Symbol, untyped] values, ?path: String?) -> void
+    def self.from_options: (Hash[Symbol, untyped] options) -> Settings
+    def self.load: (?String? path, ?enabled: bool) -> Settings
   end
 
   class Sampling

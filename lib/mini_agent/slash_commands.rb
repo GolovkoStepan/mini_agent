@@ -138,6 +138,19 @@ module MiniAgent
         format(Messages::CMD_POLICY_LINE, name: Messages::POLICY_NAMES.fetch(@config.policy)),
         format(Messages::CMD_SAMPLING_LINE, params: sampling)
       ]
+      lines + optional_lines
+    end
+
+    # То, чего может не быть вовсе. Отдельно от обязательных строк не ради
+    # порядка: два условия в общем списке перевалили Metrics/AbcSize.
+    #
+    # Файл настроек показывается только прочитанный: строка «настроек нет»
+    # сообщала бы об отсутствии того, о чём не спрашивали. Зато прочитанный
+    # назвать необходимо — значения из файла ничем не выдают своего
+    # происхождения, и вопрос «почему модель не та» остаётся без ответа.
+    def optional_lines
+      lines = []
+      lines << format(Messages::CMD_SETTINGS_LINE, path: @config.settings_path) if @config.settings_path
       lines << format(Messages::LOG_STARTED, path: @config.log) if @config.log
       lines
     end

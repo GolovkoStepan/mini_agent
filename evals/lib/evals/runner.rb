@@ -61,6 +61,12 @@ module Evals
       parts = [RbConfig.ruby, "-Ilib", "exe/mini_agent",
                "--cwd", File.join(dir, "work"),
                "--log", File.join(dir, "log.jsonl"),
+               # Личный ~/.mini_agent/settings.json иначе молча участвовал бы
+               # в измерениях, а в отчёте его не видно — та же ошибка, что
+               # зашитая temperature: 0.1, только снаружи агента. Флагом,
+               # а не пустым файлом: строка команды существует ради повторения
+               # прогона копированием, и отказ должен быть в ней виден.
+               "--no-settings",
                "--max-turns", task.max_turns.to_s]
       parts += preset.flags
       parts += ["--seed", seed.to_s] if seed

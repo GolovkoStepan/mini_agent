@@ -12,6 +12,8 @@ require_relative "mini_agent/sampling"
 require_relative "mini_agent/window"
 require_relative "mini_agent/lookup"
 require_relative "mini_agent/config"
+# После Config: белый список ключей файла берётся из Config::ENV_KEYS.
+require_relative "mini_agent/settings"
 require_relative "mini_agent/usage"
 require_relative "mini_agent/transcript"
 require_relative "mini_agent/conversation"

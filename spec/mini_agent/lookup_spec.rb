@@ -4,8 +4,8 @@ RSpec.describe MiniAgent::Lookup do
   let(:defaults) { { model: "по умолчанию", turns: 50, stream: true }.freeze }
   let(:keys) { { model: "LLM_MODEL", turns: "MAX_TURNS", stream: "LLM_STREAM", temperature: "LLM_TEMPERATURE" }.freeze }
 
-  def lookup(options = {}, env = {})
-    described_class.new(options, env, defaults: defaults, keys: keys)
+  def lookup(options = {}, env = {}, file = {})
+    described_class.new(options, env, defaults: defaults, keys: keys, file: file)
   end
 
   describe "приоритет источников" do
@@ -19,6 +19,21 @@ RSpec.describe MiniAgent::Lookup do
 
     it "берёт умолчание, когда не задано ничего" do
       expect(lookup.fetch(:model)).to eq("по умолчанию")
+    end
+
+    it "берёт файл настроек, когда нет ни опции, ни окружения" do
+      expect(lookup({}, {}, { model: "из файла" }).fetch(:model)).to eq("из файла")
+    end
+
+    # Файл говорит «как обычно», окружение — «сейчас иначе»: из двух указаний
+    # одного смысла верить надо набранному в этом запуске.
+    it "предпочитает переменную окружения файлу" do
+      expect(lookup({}, { "LLM_MODEL" => "из окружения" }, { model: "из файла" }).fetch(:model))
+        .to eq("из окружения")
+    end
+
+    it "предпочитает опцию файлу" do
+      expect(lookup({ model: "из флага" }, {}, { model: "из файла" }).fetch(:model)).to eq("из флага")
     end
   end
 
@@ -46,6 +61,23 @@ RSpec.describe MiniAgent::Lookup do
     it "отвечает на given?, задано ли значение человеком" do
       expect(lookup({ model: "своя" }).given?(:model)).to be(true)
       expect(lookup.given?(:model)).to be(false)
+    end
+
+    # Значение из файла задано человеком ровно так же, как из окружения:
+    # иначе «max_tokens» в файле молча проиграл бы доле окна, и число стояло
+    # бы в настройках, не действуя.
+    it "считает заданным значение из файла" do
+      expect(lookup({}, {}, { model: "из файла" }).given?(:model)).to be(true)
+    end
+
+    # Проверка на nil, а не на истинность: иначе "stream": false провалилось
+    # бы в умолчание true — выключить поток файлом стало бы нельзя при том,
+    # что включить можно.
+    it "не теряет false из файла" do
+      given = lookup({}, {}, { stream: false })
+
+      expect(given.given(:stream)).to be(false)
+      expect(given.bool(:stream)).to be(false)
     end
   end
 

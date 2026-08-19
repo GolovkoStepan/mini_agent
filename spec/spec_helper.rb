@@ -26,6 +26,15 @@ RSpec.configure do |config|
   config.expect_with :rspec do |c|
     c.syntax = :expect
   end
+
+  # Настоящий ~/.mini_agent/settings.json не участвует в тестах: CLI читает
+  # его сам, и на машине, где файл есть, полсотни примеров cli_spec молча
+  # работали бы с чужой моделью и чужой политикой. Тот же довод, по которому
+  # Config принимает env: явно, — только окружение можно передать, а путь
+  # файла зашит в константу. Примеры, которым файл нужен, называют его сами.
+  config.before do
+    stub_const("MiniAgent::Settings::PATH", File.join(Dir.tmpdir, "mini_agent_нет_настроек.json"))
+  end
 end
 
 # Тесты не должны зависеть от переменных окружения разработчика, поэтому

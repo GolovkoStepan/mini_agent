@@ -140,6 +140,37 @@ RSpec.describe MiniAgent::CLI do
       end
     end
 
+    describe "--settings" do
+      around do |example|
+        Dir.mktmpdir { |dir| example.run(@dir = dir) }
+      end
+
+      it "берёт значения из названного файла" do
+        path = File.join(@dir, "settings.json")
+        File.write(path, '{"model": "из-файла"}')
+
+        start(["--base-url", "http://cli.test/v1", "--settings", path, "задача"])
+
+        expect(a_request(:post, endpoint).with(body: hash_including("model" => "из-файла"))).to have_been_made
+      end
+
+      # Опечатка в пути означает работу с чужими настройками при полной
+      # уверенности в своих. Ошибка употребления: код 1, как у --cwd.
+      it "сообщает о ненайденном файле с кодом 1" do
+        code = start(["--base-url", "http://cli.test/v1", "--settings", "/нет/такого.json", "задача"])
+
+        expect(code).to eq(1)
+        expect(out.string).to include("Файл настроек не найден")
+      end
+
+      it "не выбирает между --settings и --no-settings" do
+        code = start(["--base-url", "http://cli.test/v1", "--settings", "/любой.json", "--no-settings", "задача"])
+
+        expect(code).to eq(1)
+        expect(out.string).to include("--no-settings")
+      end
+    end
+
     describe "--log" do
       around do |example|
         Dir.mktmpdir { |dir| example.run(@dir = dir) }

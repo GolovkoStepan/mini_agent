@@ -30,6 +30,13 @@ RSpec.describe Evals::Runner do
                               "--max-turns 4", "--temperature 0.3", "--seed 7", "-- сделай")
     end
 
+    # Личный ~/.mini_agent/settings.json иначе молча участвовал бы в замерах,
+    # а в отчёте его не видно. Флаг проверяется именно в строке команды: она
+    # существует ради повторения прогона копированием.
+    it "отказывается от личного файла настроек" do
+      expect(runner.command(task, preset, "/тмп/п", 7)).to include("--no-settings")
+    end
+
     it "не передаёт зерно, когда его отключили" do
       expect(runner(seed: nil).command(task, preset, "/тмп/п", nil)).not_to include("--seed")
     end

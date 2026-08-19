@@ -41,6 +41,55 @@ RSpec.describe MiniAgent::Config do
     end
   end
 
+  # Четвёртый источник: файл настроек между окружением и умолчаниями. Сам
+  # файл Config не читает — его приносит CLI, поэтому здесь настройки
+  # передаются готовым объектом и диск не участвует.
+  describe "файл настроек" do
+    def with_file(values, options = {}, env = {})
+      described_class.new(options, env: env, settings: MiniAgent::Settings.new(values, path: "/tmp/s.json"))
+    end
+
+    it "перебивает умолчание" do
+      expect(with_file(model: "из файла").model).to eq("из файла")
+    end
+
+    it "уступает переменной окружения" do
+      expect(with_file({ model: "из файла" }, {}, { "LLM_MODEL" => "из окружения" }).model).to eq("из окружения")
+    end
+
+    it "уступает опции" do
+      expect(with_file({ model: "из файла" }, { model: "из флага" }).model).to eq("из флага")
+    end
+
+    it "выключает поток значением false" do
+      expect(with_file(stream: false).stream?).to be(false)
+    end
+
+    # Главная ловушка всей затеи: слив файл поверх DEFAULTS, мы получили бы
+    # «max_tokens» в настройках, который молча не действует — доля окна
+    # перевесила бы, потому что given? отвечает «человек этого не задавал».
+    it "делает лимит токенов заданным, а не выведенным" do
+      config = with_file(max_tokens: 4096)
+      config.context_window = 100_000
+
+      expect(config.max_tokens).to eq(4096)
+      expect(config.max_tokens_derived?).to be(false)
+    end
+
+    # Вторая точка, зависящая от given?: политика из файла обязана перебивать
+    # allow_unsafe так же, как перебивает его --policy.
+    it "даёт политике из файла перебить allow_unsafe" do
+      config = with_file({ policy: "ask" }, { allow_unsafe: true })
+
+      expect(config.policy).to eq(:ask)
+    end
+
+    it "запоминает путь файла" do
+      expect(with_file(model: "из файла").settings_path).to eq("/tmp/s.json")
+      expect(described_class.new({}, env: {}).settings_path).to be_nil
+    end
+  end
+
   describe "#allow_unsafe?" do
     it "по умолчанию выключен" do
       expect(described_class.new({}, env: {}).allow_unsafe?).to be(false)

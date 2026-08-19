@@ -102,6 +102,20 @@ RSpec.describe MiniAgent::Transcript do
 
       expect(records.first["sampling"]).to eq({})
     end
+
+    # Путь, а не содержимое: в файле может лежать api_key. Ключ пишется
+    # всегда, по тому же доводу, что и пустой сэмплинг, — иначе «файла
+    # не было» неотличимо от лога версии, которая про файл не знала.
+    it "пишет путь файла настроек и null, когда файла не было" do
+      file = MiniAgent::Settings.new({ model: "из-файла" }, path: "/тмп/settings.json")
+      log = described_class.new(path)
+      log.session(MiniAgent::Config.new({}, env: {}, settings: file))
+      log.session(MiniAgent::Config.new({}, env: {}))
+      log.close
+
+      expect(records.map { |record| record["settings"] }).to eq(["/тмп/settings.json", nil])
+      expect(records.last).to have_key("settings")
+    end
   end
 
   describe "устойчивость" do

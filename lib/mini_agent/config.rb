@@ -5,7 +5,8 @@ require "uri"
 module MiniAgent
   # Настройки агента.
   #
-  # Единое правило приоритета: options (CLI) → ENV → значение по умолчанию.
+  # Единое правило приоритета: options (CLI) → ENV → файл настроек →
+  # значение по умолчанию.
   # В исходном скрипте правило было непоследовательным: base_url/api_key/model
   # читались только из ENV и молча игнорировали переданные опции, а max_turns и
   # соседние — учитывали оба источника.
@@ -149,6 +150,12 @@ module MiniAgent
     attr_reader :base_url, :api_key, :model, :max_turns,
                 :retry_count, :retry_delay, :timeout, :llm_timeout, :policy, :cwd, :log
 
+    # Путь прочитанного файла настроек или nil, если файла не было.
+    # Нужен /model и заголовку журнала: значения из файла ничем не выдают
+    # своего происхождения, и без пути вопрос «почему агент ходит не на тот
+    # сервер» не имеет видимого ответа.
+    attr_reader :settings_path
+
     # Размер контекстного окна: число или nil, если он неизвестен.
     #
     # Записываемо намеренно — значение может прийти от сервера уже после
@@ -157,8 +164,12 @@ module MiniAgent
     # два источника одного и того же числа.
     attr_accessor :context_window
 
-    def initialize(options = {}, env: ENV)
-      @lookup = Lookup.new(options, env, defaults: DEFAULTS, keys: ENV_KEYS)
+    # Настройки приходят готовыми, а файл читает CLI: у того уже есть и флаги
+    # (--settings, --no-settings), и обработка ConfigError. Иначе полтысячи
+    # строк config_spec начали бы читать диск разработчика.
+    def initialize(options = {}, env: ENV, settings: Settings::NONE)
+      @settings_path = settings.path
+      @lookup = Lookup.new(options, env, defaults: DEFAULTS, keys: ENV_KEYS, file: settings.values)
 
       read_connection
       read_limits

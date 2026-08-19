@@ -70,6 +70,10 @@ module MiniAgent
       [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
       [:cwd, "--cwd DIR", Messages::OPT_CWD],
       [:log, "--log FILE", Messages::OPT_LOG],
+      # Два отдельных флага, а не --[no-]settings: у первого есть аргумент,
+      # у второго его быть не может.
+      [:settings, "--settings FILE", Messages::OPT_SETTINGS],
+      [:no_settings, "--no-settings", Messages::OPT_NO_SETTINGS],
       [:help, "-h", "--help", Messages::OPT_HELP],
       [:version, "-v", "--version", Messages::OPT_VERSION]
     ].freeze
@@ -109,7 +113,9 @@ module MiniAgent
     private
 
     def run(options, args, parser)
-      config = Config.new(options)
+      # Файл настроек читает CLI, а не Config: здесь обработка ConfigError,
+      # а у Config тесты не должны начинать читать диск разработчика.
+      config = Config.new(options, settings: Settings.from_options(options))
       ui = UI.new(out: @out, markdown: config.markdown?)
 
       return list_models(config, ui) if options[:list_models]
@@ -128,6 +134,10 @@ module MiniAgent
       end
     end
 
+    # Файл настроек читает CLI, а не Config: здесь и флаги, и обработка
+    # ConfigError. Оба флага сразу — отказ, а не угадывание: указания
+    # противоречат друг другу и ни одно не точнее другого (прецедент
+    # --policy asl — падать громко там, где выбор был бы выдуман).
     # Reline получает те же потоки, что и весь остальной ввод-вывод CLI:
     # он сам решит, включать ли себя, по признаку терминала у обоих.
     def interactive(config, ui)
