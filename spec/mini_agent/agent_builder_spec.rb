@@ -11,7 +11,7 @@ RSpec.describe MiniAgent::AgentBuilder do
 
   after { FileUtils.remove_entry(dir) }
 
-  before { stub_request(:get, %r{/api/v0/models}).to_return(status: 404, body: "") }
+  before { stub_request(:get, %r{/api/v1/models}).to_return(status: 404, body: "") }
 
   subject(:builder) { described_class.new(config: config, ui: ui) }
 

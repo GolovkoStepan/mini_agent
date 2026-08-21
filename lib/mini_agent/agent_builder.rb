@@ -23,7 +23,7 @@ module MiniAgent
     # и файл журнала живут ровно столько, сколько выполняется блок.
     def call
       log = transcript
-      detect_window
+      watcher = detect_window
       # Журнал уходит и клиенту: размышления модели приходят в ответе и
       # в историю не попадают, так что записать их больше неоткуда.
       client = LLMClient.new(config: @config, ui: @ui, transcript: log)
@@ -33,6 +33,7 @@ module MiniAgent
         yield build_agent(connected, tools, log), tools
       end
     ensure
+      watcher&.kill
       log&.close
     end
 
@@ -45,10 +46,32 @@ module MiniAgent
     # Молча: проба необязательна, а её неудача — обычное дело на любом
     # сервере, кроме LM Studio. Узнанное видно в /context и /usage, там же
     # видно и незнание — строкой о том, что размер окна неизвестен.
+    #
+    # Первая попытка синхронная, и уносить её в фон нельзя: от окна тут же
+    # считается потолок описания проекта (build_tools ниже), а из него
+    # выводится max_tokens первого же запроса. Отданный в фон, первый ход
+    # уходил бы с неизвестным окном ВСЕГДА — редкая поломка сменилась бы
+    # постоянной.
+    #
+    # Промах, однако, до сих пор означал незнание до конца сессии: проба
+    # шла один раз за запуск, а модель LM Studio поднимает по первому
+    # запросу к ней, то есть уже после нас — /context честно сообщал, что
+    # размер неизвестен, и лечилось это перезапуском. Отсюда фоновые
+    # повторы: возвращаем поток, чтобы call прибрал его в ensure.
+    # Возвращает поток фоновых повторов либо nil — больше от него ничего
+    # не берут, и вернуть отсюда размер окна значило бы отдать в ensure
+    # число вместо потока.
     def detect_window
       return if @config.context_window
 
-      @config.context_window = WindowProbe.new(config: @config).call
+      probe = WindowProbe.new(config: @config)
+      size = probe.call
+      if size
+        @config.context_window = size
+        nil
+      else
+        probe.watch { |window| @config.context_window = window }
+      end
     end
 
     # Подтверждение перезаписи в /init спрашивается тем же объектом, что и
