@@ -87,7 +87,9 @@ module MiniAgent
       cells = self.class.cells(row)
       Array.new(columns) do |index|
         parts = @inline.call(cells[index].to_s)
-        style ? parts.map { |content, own| [content, own || style] } : parts
+        next parts unless style
+
+        parts.map { |content, own| [content, own.empty? ? [style] : own] }
       end
     end
 

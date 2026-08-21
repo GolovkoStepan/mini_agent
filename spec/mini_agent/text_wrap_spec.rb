@@ -7,7 +7,7 @@ RSpec.describe MiniAgent::TextWrap do
 
   subject(:wrap) { described_class.new(paint: paint, indent: "  ", width: 40) }
 
-  def plain(text) = [[text, nil]]
+  def plain(text) = [[text, []]]
 
   it "укладывает строку в ширину терминала" do
     lines = wrap.call(plain("слово " * 20)).split("\n")
@@ -51,7 +51,7 @@ RSpec.describe MiniAgent::TextWrap do
   # длиной — по готовой строке её уже не измерить.
   describe "#lines" do
     it "отдаёт длину строки без раскраски" do
-      expect(wrap.lines([["make", :gray], [" spec", nil]], 20)).to eq([["<gray>make</> spec", 9]])
+      expect(wrap.lines([["make", [:gray]], [" spec", []]], 20)).to eq([["<gray>make</> spec", 9]])
     end
 
     # Проза длинное слово не рвёт (разорванный путь не прочесть), а ячейка
@@ -67,19 +67,26 @@ RSpec.describe MiniAgent::TextWrap do
     # Соседние куски одного стиля склеиваются: иначе каждое слово внутри
     # `команды с пробелами` получило бы свою пару ANSI-кодов.
     it "красит соседей одного стиля разом" do
-      expect(wrap.call([["make spec", :gray]])).to eq("<gray>make spec</>")
+      expect(wrap.call([["make spec", [:gray]]])).to eq("<gray>make spec</>")
     end
 
     # Разметка кончается посреди слова: `код`, — это два сегмента подряд,
     # и набор по кускам вставил бы между ними пробел.
     it "не отрывает соседний сегмент от слова" do
-      expect(wrap.call([["make", :gray], [", потом", nil]])).to eq("<gray>make</>, потом")
+      expect(wrap.call([["make", [:gray]], [", потом", []]])).to eq("<gray>make</>, потом")
+    end
+
+    # Стилей у куска бывает несколько: `код` внутри **жирного** несёт оба.
+    # Пустой список означает «красить нечем» — проверка на истинность тут
+    # не годится, пустой массив истинен.
+    it "накладывает все стили куска разом" do
+      expect(wrap.call([["путь", %i[bold gray]]])).to eq("<bold,gray>путь</>")
     end
 
     # Длины считаются до раскраски: ANSI-коды занимают знаки в строке, но
     # не столбцы на экране (те же грабли, что в Spinner#line).
     it "не считает разметку за текст при переносе" do
-      styled = wrap.call(Array.new(10) { [["слово", :bold], [" ", nil]] }.flatten(1))
+      styled = wrap.call(Array.new(10) { [["слово", [:bold]], [" ", []]] }.flatten(1))
 
       expect(styled.lines.size).to eq(wrap.call(plain("слово " * 10)).lines.size)
     end

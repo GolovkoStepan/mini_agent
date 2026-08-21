@@ -32,13 +32,19 @@ module MiniAgent
     BULLET = /\A(\s*)[-*+]\s+(.*)\z/
     NUMBERED = /\A(\s*)(\d+[.)])\s+(.*)\z/
 
-    # Разбор строки на куски со стилями. Порядок важен: код разбирается
-    # первым, иначе `**` внутри `code` съел бы жирный.
+    # Образцы разметки: что ищем, каким стилем красим и разбирается ли
+    # найденное дальше. Внутри `кода` разметки нет — там `**` часть текста,
+    # обычно шаблон или умножение; внутри жирного есть — **`путь`** у модели
+    # дело самое обычное.
+    #
+    # Порядок значим только при совпадении с одного и того же места: там
+    # побеждает верхний, и код стоит первым, чтобы `**` внутри него остались
+    # текстом.
     INLINE = [
-      [/`([^`]+)`/, :gray],
-      [/\*\*([^*]+)\*\*/, :bold],
-      [/__([^_]+)__/, :bold],
-      [/(?<![*\w])\*([^*\n]+)\*(?!\*)/, :dim]
+      [/`([^`]+)`/, :gray, false],
+      [/\*\*(.+?)\*\*/, :bold, true],
+      [/__(.+?)__/, :bold, true],
+      [/(?<![*\w])\*([^*\n]+)\*(?!\*)/, :dim, true]
     ].freeze
 
     # paint — раскраска от UI: она знает про TTY, и второй такой выключатель
@@ -185,26 +191,44 @@ module MiniAgent
       "#{lead}#{marker}#{@wrap.call(inline(text), hang: hang)}"
     end
 
-    # Строка режется на пары «текст + стиль» ДО набора по ширине и до
+    # Строка режется на пары «текст + стили» ДО набора по ширине и до
     # раскраски. Обратный порядок — сперва покрасить, потом переносить —
     # даёт ошибку, уже описанную в Spinner#line: ANSI-коды занимают знаки
     # в строке, но не столбцы на экране, и перенос считал бы их за текст.
-    def inline(text)
-      segments = [[text, nil]]
-      INLINE.each do |pattern, style|
-        segments = segments.flat_map { |part| part[1] ? [part] : split(part[0], pattern, style) }
-      end
-      segments.reject { |content, _| content.empty? }
+    #
+    # Разбор рекурсивный: побеждает ближайшее к началу совпадение, а то, что
+    # попало внутрь, разбирается заново с добавленным стилем. Прежняя версия
+    # применяла образцы по очереди ко всей строке — сперва весь код, потом
+    # весь жир, — и на вложенности ломалась дважды. Найдено в журнале сессии
+    # на строке `1. **`.github/workflows/ci.yml`** — обновлён`: код разрезает
+    # строку на три куска, обе звёздочки остаются в разных, и жир не находится
+    # вовсе — пользователь видит `**` дословно. Хуже второе: осиротевшая пара
+    # слипается со следующей, и `**`код`** и **жир**` печатал жирным « и ».
+    # Пустой стиль берётся у того, кто сегменты принимает: два имени одного
+    # значения разошлись бы, а форма сегмента — его контракт.
+    def inline(text, styles = TextWrap::NO_STYLE)
+      return [] if text.empty?
+
+      found = earliest(text)
+      return [[text, styles]] unless found
+
+      match, style, deep = found
+      inner = styles + [style]
+      body = deep ? inline(match[1], inner) : [[match[1], inner]]
+      [*inline(match.pre_match, styles), *body, *inline(match.post_match, styles)]
     end
 
-    def split(text, pattern, style)
-      result = []
-      rest = text
-      while (match = pattern.match(rest))
-        result << [match.pre_match, nil] << [match[1], style]
-        rest = match.post_match
+    # Ближайшее к началу совпадение; при равенстве побеждает первый образец
+    # таблицы. Строгое «<» здесь и означает «первый выигрывает ничью».
+    def earliest(text)
+      best = nil
+      INLINE.each do |pattern, style, deep|
+        match = pattern.match(text)
+        next if match.nil? || (best && best.first.begin(0) <= match.begin(0))
+
+        best = [match, style, deep]
       end
-      result << [rest, nil]
+      best
     end
   end
 end
