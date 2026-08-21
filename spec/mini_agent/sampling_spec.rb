@@ -92,6 +92,73 @@ RSpec.describe MiniAgent::Sampling do
     end
   end
 
+  describe "общая форма --sampling" do
+    it "раскладывает пару по отдельному ключу" do
+      expect(sampling({ sampling: ["temperature=0.3"] })).to eq({ temperature: 0.3 })
+    end
+
+    it "принимает несколько пар в одном флаге через запятую" do
+      expect(sampling({ sampling: ["temperature=0.3,top_k=50"] })).to eq({ temperature: 0.3, top_k: 50 })
+    end
+
+    it "принимает несколько пар через пробел" do
+      expect(sampling({ sampling: ["min_p=0.05 seed=42"] })).to eq({ min_p: 0.05, seed: 42 })
+    end
+
+    # Затирание было бы молчаливым: два указания, действует одно.
+    it "копит пары из повторённого флага" do
+      result = sampling({ sampling: ["top_k=50", "temperature=0.3"] })
+
+      expect(result).to eq({ top_k: 50, temperature: 0.3 })
+    end
+
+    it "разбирает значение так же, как именованный флаг" do
+      expect(sampling({ sampling: ["top_k=50"] })).to eq(sampling({ top_k: 50 }))
+    end
+
+    # Ради этой проверки общая форма и заводится: пересланная как есть
+    # опечатка молча игнорируется сервером, и флаг выглядит рабочим.
+    it "роняет запуск на неизвестном ключе, а не шлёт его серверу" do
+      expect { sampling({ sampling: ["temperatur=0.3"] }) }
+        .to raise_error(MiniAgent::ConfigError, /temperatur/)
+    end
+
+    it "подсказывает ближайший известный ключ" do
+      expect { sampling({ sampling: ["temperatur=0.3"] }) }
+        .to raise_error(MiniAgent::ConfigError, /имелось в виду «temperature»/)
+    end
+
+    # Запятая-разделитель разрежет «0,3» пополам, и обломок «3» упрётся сюда.
+    it "требует вид ключ=значение" do
+      expect { sampling({ sampling: ["temperature=0,3"] }) }
+        .to raise_error(MiniAgent::ConfigError, /дробная часть — точкой/)
+    end
+
+    # Тот же выбор, что у --settings вместе с --no-settings: указания
+    # противоречат друг другу, и ни одно не точнее другого.
+    it "не выбирает между отдельным флагом и общей формой" do
+      expect { sampling({ temperature: 0.7, sampling: ["temperature=0.3"] }) }
+        .to raise_error(MiniAgent::ConfigError, /и отдельным флагом, и в --sampling/)
+    end
+
+    it "не выбирает между двумя одинаковыми ключами в общей форме" do
+      expect { sampling({ sampling: ["top_k=50", "top_k=20"] }) }
+        .to raise_error(MiniAgent::ConfigError, /дважды/)
+    end
+
+    # Разложенная пара — обычная опция, а не свой источник значений:
+    # иначе Lookup#given? видел бы одно число в двух местах.
+    it "перебивает переменную окружения, как и именованный флаг" do
+      result = sampling({ sampling: ["temperature=0.7"] }, { "LLM_TEMPERATURE" => "0.1" })
+
+      expect(result).to eq({ temperature: 0.7 })
+    end
+
+    it "не задаёт ничего, когда флаг не набран" do
+      expect(sampling({ sampling: [] })).to eq({})
+    end
+  end
+
   # Значения не должны разъезжаться между вызовами, а ConfigError обязан
   # прилетать на старте, а не на десятом ходу.
   it "разбирает параметры один раз" do

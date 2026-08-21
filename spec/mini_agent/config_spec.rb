@@ -359,6 +359,15 @@ RSpec.describe MiniAgent::Config do
 
       expect(config.max_tokens_derived?).to be(true)
     end
+
+    # Общая форма разложена по тем же ключам до сборки Lookup — значит, и
+    # видна она должна быть ровно так же, как отдельный флаг, не больше.
+    it "не путает соседние настройки: --sampling не меняет происхождения лимита" do
+      config = described_class.new({ sampling: ["temperature=0.3"] }, env: {})
+      config.context_window = 8192
+
+      expect(config.max_tokens_derived?).to be(true)
+    end
   end
 
   # Порог, с которого место считается кончившимся. Настройкой стал потому,

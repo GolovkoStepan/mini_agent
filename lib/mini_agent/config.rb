@@ -167,7 +167,13 @@ module MiniAgent
     # Настройки приходят готовыми, а файл читает CLI: у того уже есть и флаги
     # (--settings, --no-settings), и обработка ConfigError. Иначе полтысячи
     # строк config_spec начали бы читать диск разработчика.
+    # Общая форма --sampling раскладывается по отдельным ключам ДО Lookup,
+    # а не рядом с ним: иначе у одного числа появилось бы два источника,
+    # и given? — признак «задал ли это человек» — отвечал бы по одному
+    # из них. Разбор живёт в Sampling, потому что список ключей там же
+    # (см. Sampling.expand).
     def initialize(options = {}, env: ENV, settings: Settings::NONE)
+      options = Sampling.expand(options)
       @settings_path = settings.path
       @lookup = Lookup.new(options, env, defaults: DEFAULTS, keys: ENV_KEYS, file: settings.values)
 

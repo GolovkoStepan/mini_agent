@@ -97,6 +97,22 @@ RSpec.describe MiniAgent::CLI do
       expect(a_request(:post, endpoint).with(body: hash_including("model" => "llama3"))).to have_been_made
     end
 
+    # Повторяемый флаг: обычный хранил бы последнее значение, и «два
+    # указания, действует одно» прошло бы молча. Проверяется по телу
+    # запроса — там разница между «скопилось» и «затёрлось» и видна.
+    it "копит повторённый --sampling, а не затирает" do
+      start(["--base-url", "http://cli.test/v1", "--sampling", "top_k=50",
+             "--sampling", "temperature=0.3", "задача"])
+
+      matcher = a_request(:post, endpoint).with(body: hash_including("top_k" => 50, "temperature" => 0.3))
+      expect(matcher).to have_been_made
+    end
+
+    it "отвергает опечатку в ключе --sampling с кодом 1" do
+      expect(start(["--base-url", "http://cli.test/v1", "--sampling", "temperatur=0.3", "задача"])).to eq(1)
+      expect(out.string).to include("temperature")
+    end
+
     it "передаёт схему инструмента bash" do
       start(["--base-url", "http://cli.test/v1", "задача"])
 

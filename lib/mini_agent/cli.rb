@@ -35,49 +35,6 @@ module MiniAgent
       Errno::ENETUNREACH, Errno::ETIMEDOUT, SocketError
     ].freeze
 
-    # Описание флагов таблицей: [ключ настроек, *аргументы OptionParser#on].
-    # Значение флага кладётся в options под указанным ключом.
-    FLAGS = [
-      [:interactive, "-i", "--interactive", Messages::OPT_INTERACTIVE],
-      [:max_turns, "--max-turns N", Integer, Messages::OPT_MAX_TURNS],
-      [:max_tokens, "--max-tokens N", Integer, Messages::OPT_MAX_TOKENS],
-      [:context_window, "--context-window N", Integer, Messages::OPT_CONTEXT_WINDOW],
-      [:llm_timeout, "--llm-timeout N", Float, Messages::OPT_LLM_TIMEOUT],
-      [:retry_count, "--retry-count N", Integer, Messages::OPT_RETRY_COUNT],
-      [:retry_delay, "--retry-delay N", Float, Messages::OPT_RETRY_DELAY],
-      [:base_url, "--base-url URL", Messages::OPT_BASE_URL],
-      [:model, "--model NAME", Messages::OPT_MODEL],
-      [:stream, "--[no-]stream", Messages::OPT_STREAM],
-      [:auto_compact, "--[no-]auto-compact", Messages::OPT_AUTO_COMPACT],
-      # Без типа Float намеренно: разбор и проверку диапазона делает Config,
-      # и «--compact-at abc» обязано падать одним и тем же ConfigError
-      # независимо от того, пришло значение флагом или из AUTO_COMPACT_AT.
-      [:compact_at, "--compact-at N", Messages::OPT_COMPACT_AT],
-      [:markdown, "--[no-]markdown", Messages::OPT_MARKDOWN],
-      # Параметры сэмплинга. Умолчаний у них нет: не задано — не отправляем,
-      # решает пресет сервера (см. Sampling).
-      [:temperature, "--temperature N", Float, Messages::OPT_TEMPERATURE],
-      [:top_p, "--top-p N", Float, Messages::OPT_TOP_P],
-      [:top_k, "--top-k N", Integer, Messages::OPT_TOP_K],
-      [:min_p, "--min-p N", Float, Messages::OPT_MIN_P],
-      [:repeat_penalty, "--repeat-penalty N", Float, Messages::OPT_REPEAT_PENALTY],
-      [:presence_penalty, "--presence-penalty N", Float, Messages::OPT_PRESENCE_PENALTY],
-      [:frequency_penalty, "--frequency-penalty N", Float, Messages::OPT_FREQUENCY_PENALTY],
-      [:seed, "--seed N", Integer, Messages::OPT_SEED],
-      [:policy, "--policy NAME", Messages::OPT_POLICY],
-      [:plan, "--plan", Messages::OPT_PLAN],
-      [:allow_unsafe, "--[no-]allow-unsafe", Messages::OPT_ALLOW_UNSAFE],
-      [:list_models, "--list-models", Messages::OPT_LIST_MODELS],
-      [:cwd, "--cwd DIR", Messages::OPT_CWD],
-      [:log, "--log FILE", Messages::OPT_LOG],
-      # Два отдельных флага, а не --[no-]settings: у первого есть аргумент,
-      # у второго его быть не может.
-      [:settings, "--settings FILE", Messages::OPT_SETTINGS],
-      [:no_settings, "--no-settings", Messages::OPT_NO_SETTINGS],
-      [:help, "-h", "--help", Messages::OPT_HELP],
-      [:version, "-v", "--version", Messages::OPT_VERSION]
-    ].freeze
-
     def self.start(argv, out: $stdout, input: $stdin)
       new(out: out, input: input).start(argv)
     end
@@ -88,9 +45,10 @@ module MiniAgent
     end
 
     def start(argv)
-      options = {}
-      @parser = build_parser(options)
-      args = @parser.parse(argv.dup)
+      flags = Options.new
+      @parser = flags.parser
+      args = flags.parse(argv)
+      options = flags.values
 
       return handle(:help, @parser) if options[:help]
       return handle(:version) if options[:version]
@@ -195,16 +153,6 @@ module MiniAgent
       @out.puts(Messages::NO_TASK_HINT2)
       @out.puts(parser)
       EXIT_USAGE
-    end
-
-    def build_parser(options)
-      OptionParser.new do |opts|
-        opts.banner = Messages::BANNER
-
-        FLAGS.each do |key, *definition|
-          opts.on(*definition) { |value| options[key] = value }
-        end
-      end
     end
   end
 end

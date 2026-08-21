@@ -107,7 +107,9 @@ module MiniAgent
 
   class Sampling
     KEYS: Hash[Symbol, Symbol]
+    SEPARATOR: Regexp
 
+    def self.expand: (Hash[Symbol, untyped] options) -> Hash[Symbol, untyped]
     def initialize: (Config config) -> void
     def to_h: () -> Hash[Symbol, (Integer | Float)]
   end
@@ -609,11 +611,21 @@ module MiniAgent
     EXIT_LLM: Integer
     EXIT_UNFINISHED: Integer
     EXIT_CODES: Hash[Symbol, Integer]
-    FLAGS: Array[Array[untyped]]
     CONNECT_ERRORS: Array[Class]
 
     def self.start: (Array[String] argv, ?out: IO, ?input: IO) -> Integer
     def initialize: (?out: IO, ?input: IO) -> void
     def start: (Array[String] argv) -> Integer
+  end
+
+  class Options
+    FLAGS: Array[Array[untyped]]
+    ACCUMULATED: Array[Symbol]
+
+    attr_reader values: Hash[Symbol, untyped]
+    attr_reader parser: untyped
+
+    def initialize: () -> void
+    def parse: (Array[String] argv) -> Array[String]
   end
 end
