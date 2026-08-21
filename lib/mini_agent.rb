@@ -40,6 +40,7 @@ require_relative "mini_agent/prompt"
 require_relative "mini_agent/read_only"
 require_relative "mini_agent/plan_mode"
 require_relative "mini_agent/plan_store"
+require_relative "mini_agent/plan_editor"
 require_relative "mini_agent/command_guard"
 require_relative "mini_agent/tools/bash"
 # Базовый класс до наследников: они называют его в объявлении.

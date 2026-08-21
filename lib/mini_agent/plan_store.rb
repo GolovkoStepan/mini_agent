@@ -39,6 +39,17 @@ module MiniAgent
     # было бы нечем.
     FALLBACK_SLUG = "plan"
 
+    # Чтение записанного файла живёт рядом с записью, а не у PlanEditor:
+    # шапка и её разбор — это формат и его разбор, а такая пара обязана
+    # меняться вместе (прецедент EXIT_CODE и EXIT_CODE_PATTERN у Tools::Bash).
+    # Ошибки чтения не ловятся здесь намеренно: save возвращает nil потому,
+    # что план уже составлен и терять работу из-за прав на каталог незачем,
+    # а здесь терять нечего — правку либо перечитали, либо нет.
+    def self.body(path)
+      lines = File.read(path).lines
+      lines.drop(lines.take_while { |line| line.match?(Messages::PLAN_FILE_HEADER) }.size).join.strip
+    end
+
     # clock инъектируется ради теста: имя файла содержит время, и без этого
     # проверять пришлось бы регулярным выражением, то есть не проверять вовсе.
     def initialize(dir: DIR, clock: Time)

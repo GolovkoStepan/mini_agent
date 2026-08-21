@@ -48,11 +48,11 @@ RSpec.describe MiniAgent::Planner do
 
   describe "план получен" do
     it "запоминает план и спрашивает, выполнять ли его" do
-      prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+      prompt = instance_spy(MiniAgent::Prompt, ask: "n")
       planner(agent.new("1. Прочитать. 2. Написать."), prompt: prompt).call("как добавить X?", conversation)
 
       expect(plan_mode.plan).to eq("1. Прочитать. 2. Написать.")
-      expect(prompt).to have_received(:confirm?).with(/Выполнять этот план/)
+      expect(prompt).to have_received(:ask).with(/Выполнять этот план/)
     end
 
     # Отказ оставляет режим включённым: план уточняют следующей задачей,
@@ -118,6 +118,76 @@ RSpec.describe MiniAgent::Planner do
     end
   end
 
+  # Третий ответ на вопрос «выполнять?»: план почти всегда верен на три
+  # четверти, и без правки остаётся либо принять его целиком, либо отвергнуть
+  # и переписывать задачу словами.
+  describe "правка плана" do
+    # Ответы кончаются раньше, чем цикл: nil от gets — обрыв ввода, то есть
+    # отказ. Без этого «e» крутило бы вопрос вечно.
+    def answering(*answers)
+      MiniAgent::Prompt.new(input: StringIO.new(answers.join("\n")), output: StringIO.new)
+    end
+
+    def planner_with(editor, prompt)
+      described_class.new(agent: agent.new("1. Прочитать."), plan_mode: plan_mode, ui: ui,
+                          prompt: prompt, store: store, editor: editor)
+    end
+
+    # Файл — источник истины: человек мог поправить знак, а мог переписать всё.
+    it "берёт план из файла после правки" do
+      editor = instance_spy(MiniAgent::PlanEditor, call: "1. Прочитать. 2. Проверить.")
+      planner_with(editor, answering("e", "n")).call("как добавить X?", conversation)
+
+      expect(plan_mode.plan).to eq("1. Прочитать. 2. Проверить.")
+      expect(out.string).to include("План перечитан из файла")
+    end
+
+    # Открыть план в редакторе — не то же самое, что одобрить его: «поправил,
+    # глянул, передумал» обязано остаться возможным.
+    it "спрашивает заново, а не считает правку согласием" do
+      editor = instance_spy(MiniAgent::PlanEditor, call: "исправленный план")
+      prompt = answering("e", "y")
+      runner = agent.new("1. Прочитать.", "сделано")
+      described_class.new(agent: runner, plan_mode: plan_mode, ui: ui, prompt: prompt,
+                          store: store, editor: editor).call("как добавить X?", conversation)
+
+      expect(runner.tasks.last).to include("исправленный план")
+    end
+
+    it "передаёт редактору путь сохранённого файла" do
+      editor = instance_spy(MiniAgent::PlanEditor, call: nil)
+      planner_with(editor, answering("e", "n")).call("как добавить X?", conversation)
+
+      expect(editor).to have_received(:call).with(a_string_including(@dir))
+    end
+
+    # Правка не удалась (не задан EDITOR, файл не записался) — план прежний,
+    # вопрос прежний. Терять из-за этого составленный план незачем.
+    it "оставляет прежний план, когда править не вышло" do
+      editor = instance_spy(MiniAgent::PlanEditor, call: nil)
+      planner_with(editor, answering("e", "n")).call("как добавить X?", conversation)
+
+      expect(plan_mode.plan).to eq("1. Прочитать.")
+      expect(out.string).not_to include("План перечитан")
+    end
+
+    # Очистить буфер, чтобы передумать, — то же соглашение, что у git commit.
+    it "считает опустевший файл отказом" do
+      editor = instance_spy(MiniAgent::PlanEditor, call: "   \n")
+      result = planner_with(editor, answering("e", "y")).call("как добавить X?", conversation)
+
+      expect(out.string).to include("считаю это отказом", "Остаёмся в планировании")
+      expect(result).to be(conversation)
+    end
+
+    it "не зовёт редактор, когда план одобрили сразу" do
+      editor = instance_spy(MiniAgent::PlanEditor)
+      planner_with(editor, answering("y")).call("как добавить X?", conversation)
+
+      expect(editor).not_to have_received(:call)
+    end
+  end
+
   describe "план в файле" do
     # Файл пишется ДО вопроса: «нет» означает «не выполнять», а не
     # «выбросить». Уточняют план как раз после отказа, и сравнить его
@@ -155,7 +225,7 @@ RSpec.describe MiniAgent::Planner do
       described_class.new(agent: runner, plan_mode: plan_mode, ui: ui, prompt: prompt, store: store)
                      .call("как добавить X?", nil, confirm: false)
 
-      expect(prompt).not_to have_received(:confirm?)
+      expect(prompt).not_to have_received(:ask)
       expect(runner.tasks.length).to eq(1)
       expect(Dir.children(@dir).length).to eq(1)
       expect(out.string).to include("План сохранён", "План не выполнялся")
@@ -169,7 +239,7 @@ RSpec.describe MiniAgent::Planner do
       prompt = instance_spy(MiniAgent::Prompt)
       planner(agent.new(nil), prompt: prompt).call("как добавить X?", conversation)
 
-      expect(prompt).not_to have_received(:confirm?)
+      expect(prompt).not_to have_received(:ask)
       expect(out.string).to include("Плана нет")
     end
 
@@ -177,7 +247,7 @@ RSpec.describe MiniAgent::Planner do
       prompt = instance_spy(MiniAgent::Prompt)
       planner(agent.new("   \n"), prompt: prompt).call("как добавить X?", conversation)
 
-      expect(prompt).not_to have_received(:confirm?)
+      expect(prompt).not_to have_received(:ask)
       expect(plan_mode.plan).to be_nil
     end
   end

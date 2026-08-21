@@ -263,6 +263,7 @@ module MiniAgent
     attr_reader error: String?
 
     def initialize: (?dir: String, ?clock: untyped) -> void
+    def self.body: (String path) -> String
     def save: (String plan, task: String, ?config: Config?) -> String?
   end
 

@@ -9,13 +9,20 @@ module MiniAgent
   # Отдельно от Agent — потому что здесь спрашивают человека, а разовый
   # запуск (--plan) обязан обойтись без вопросов и просто напечатать план.
   class Planner
-    def initialize(agent:, plan_mode:, ui:, prompt: nil, store: nil, config: nil)
+    # Ответы на вопрос «выполнять?». Заведены таблицей, а не разбором строки
+    # по месту: буквы названы в самом вопросе (PLAN_CONFIRM), и два списка
+    # разошлись бы при первой правке текста.
+    APPROVE = "y"
+    EDIT = "e"
+
+    def initialize(agent:, plan_mode:, ui:, prompt: nil, store: nil, config: nil, editor: nil)
       @agent = agent
       @plan_mode = plan_mode
       @ui = ui
       @prompt = prompt || Prompt.new
       @store = store || PlanStore.new
       @config = config
+      @editor = editor || PlanEditor.new(ui: ui)
     end
 
     # Возвращает историю — ту, что вернул run, а не ту, что передали:
@@ -32,12 +39,43 @@ module MiniAgent
       @plan_mode.plan = plan
       path = save(plan, task)
       return one_shot(conversation) unless confirm
-      return keep(conversation) unless @prompt.confirm?(Messages::PLAN_CONFIRM)
 
-      execute(conversation, path)
+      decide(conversation, path)
     end
 
     private
+
+    # После правки вопрос задаётся снова, а не считается согласием: открыть
+    # план в редакторе — не то же самое, что одобрить его, и «поправил, глянул,
+    # передумал» обязано остаться возможным. Цикл заодно переживает отказы
+    # самой правки (не задан EDITOR, файл не записался): план прежний, вопрос
+    # прежний, повторять его дешевле, чем терять уже составленный план.
+    def decide(conversation, path)
+      loop do
+        case @prompt.ask(Messages::PLAN_CONFIRM)
+        when APPROVE then return execute(conversation, path)
+        when EDIT then return keep(conversation) if edit(path) == :empty
+        else return keep(conversation)
+        end
+      end
+    end
+
+    # nil от редактора — «план прежний»: спрашиваем заново, ничего не трогая.
+    # Пустой файл после правки — отказ, а не план из ничего: очистить буфер,
+    # чтобы передумать, — то же соглашение, что у git commit.
+    def edit(path)
+      text = @editor.call(path)
+      return :again if text.nil?
+
+      if text.strip.empty?
+        @ui.puts(Messages::PLAN_EDIT_EMPTY)
+        return :empty
+      end
+
+      @plan_mode.plan = text
+      @ui.puts(Messages::PLAN_EDITED)
+      :again
+    end
 
     # Файл пишется ДО вопроса, а не после согласия: «нет» означает «не
     # выполнять», а не «выбросить». Уточняют план обычно как раз тогда, когда

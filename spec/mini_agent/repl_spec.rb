@@ -244,11 +244,11 @@ RSpec.describe MiniAgent::Repl do
       # было бы только по изменённым файлам.
       it "проводит задачу через планирование и спрашивает, выполнять ли" do
         allow(client).to receive(:chat).and_return(["1. Прочитать. 2. Написать.", []])
-        prompt = instance_spy(MiniAgent::Prompt, confirm?: false)
+        prompt = instance_spy(MiniAgent::Prompt, ask: "n")
         agent, repl = planning_repl("/plan\nкак добавить X?\nexit\n", prompt: prompt)
         repl.run
 
-        expect(prompt).to have_received(:confirm?).with(/Выполнять этот план/)
+        expect(prompt).to have_received(:ask).with(/Выполнять этот план/)
         expect(agent.plan_mode.plan).to eq("1. Прочитать. 2. Написать.")
       end
 

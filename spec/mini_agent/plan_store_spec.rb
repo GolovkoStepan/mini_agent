@@ -137,4 +137,42 @@ RSpec.describe MiniAgent::PlanStore do
       expect(store.error).to be_nil
     end
   end
+  # Обратная сторона записи: файл, поправленный в редакторе, читается тем же
+  # классом, что его писал. Шапка и её разбор — пара «формат и его разбор»,
+  # и жить она обязана в одном месте.
+  describe ".body" do
+    it "отрезает шапку" do
+      saved = store.save("1. Прочитать.", task: "как добавить X?")
+
+      expect(described_class.body(saved)).to eq("1. Прочитать.")
+    end
+
+    it "возвращает правки целиком" do
+      saved = store.save("1. Прочитать.", task: "как добавить X?")
+      File.write(saved, File.read(saved).sub("1. Прочитать.", "1. Прочитать.
+2. Написать."))
+
+      expect(described_class.body(saved)).to eq("1. Прочитать.
+2. Написать.")
+    end
+
+    # Заголовки внутри плана начинаются с ## или идут после пустой строки —
+    # под образец шапки они не подходят, и терять их нельзя.
+    it "не принимает заголовки плана за шапку" do
+      saved = store.save("## Шаги
+
+1. Прочитать.", task: "как добавить X?")
+
+      expect(described_class.body(saved)).to eq("## Шаги
+
+1. Прочитать.")
+    end
+
+    it "отдаёт пустую строку у опустевшего файла" do
+      saved = store.save("план", task: "задача")
+      File.write(saved, "")
+
+      expect(described_class.body(saved)).to eq("")
+    end
+  end
 end
