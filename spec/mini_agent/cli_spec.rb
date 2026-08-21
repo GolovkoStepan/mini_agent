@@ -6,10 +6,10 @@ RSpec.describe MiniAgent::CLI do
   # примерах ниже разный — отсюда образец вместо точного URL. По умолчанию
   # отвечаем отказом: так ведёт себя любой сервер, кроме LM Studio, и все
   # примеры заодно проверяют, что без пробы агент работает как прежде.
-  before { stub_request(:get, %r{/api/v0/models}).to_return(status: 404, body: "") }
+  before { stub_request(:get, %r{/api/v1/models}).to_return(status: 404, body: "") }
 
-  def start(argv, input: StringIO.new(""))
-    described_class.start(argv, out: out, input: input)
+  def start(argv, input: StringIO.new(""), reader: nil)
+    described_class.start(argv, out: out, input: input, reader: reader)
   end
 
   # Ответ в том виде, в каком его получает пользователь: стриминг включён
@@ -47,13 +47,59 @@ RSpec.describe MiniAgent::CLI do
   end
 
   describe "запуск без задачи" do
-    it "возвращает код 1 и подсказку" do
-      expect(start([])).to eq(1)
-      expect(out.string).to include("Не указана задача")
+    # Терминал: -i дописывать не надо, диалог открывается сам.
+    describe "в терминале" do
+      # Настоящий LineReader спросил бы про tty у StringIO и ответил «нет»,
+      # а подмена признака втащила бы в тесты Reline — отсюда подстановка
+      # целиком (см. CLI#initialize). gets: nil — Ctrl+D сразу после старта.
+      let(:reader) { instance_double(MiniAgent::LineReader, interactive?: true, gets: nil) }
+      let(:server) { ["--base-url", "http://cli.test/v1"] }
+
+      before { stub_request(:post, "http://cli.test/v1/chat/completions").to_return(status: 200, body: sse("готово")) }
+
+      it "открывает интерактивный режим" do
+        expect(start(server, reader: reader)).to eq(0)
+        expect(out.string).to include("интерактивный режим")
+      end
+
+      it "не печатает подсказку про отсутствующую задачу" do
+        start(server, reader: reader)
+
+        expect(out.string).not_to include("Не указана задача")
+      end
+
+      # Пробелы — это та же пустая задача, а не задача из пробелов.
+      it "открывает интерактивный режим и на пустой строке задачи" do
+        expect(start(server + ["   "], reader: reader)).to eq(0)
+        expect(out.string).to include("интерактивный режим")
+      end
+
+      # Названная задача выполняется разово: диалог открывает её отсутствие,
+      # а не терминал сам по себе.
+      it "не открывает диалог, когда задача названа" do
+        expect(start(server + ["задача"], reader: reader)).to eq(0)
+        expect(out.string).not_to include("интерактивный режим")
+      end
     end
 
-    it "возвращает код 1 при пустой строке задачи" do
-      expect(start(["   "])).to eq(1)
+    # Вне терминала прежний громкий отказ. Молчаливый REPL вернул бы ноль,
+    # не сделав ничего, — а `mini_agent "$TASK"` с пустой по ошибке
+    # переменной выглядит ровно так.
+    describe "вне терминала" do
+      it "возвращает код 1 и подсказку" do
+        expect(start([])).to eq(1)
+        expect(out.string).to include("Не указана задача")
+      end
+
+      it "возвращает код 1 при пустой строке задачи" do
+        expect(start(["   "])).to eq(1)
+      end
+
+      # Скрипты запускают агента в пайпе, и -i там работал всегда.
+      it "открывает диалог по явному -i" do
+        expect(start(["-i", "--base-url", "http://cli.test/v1"], input: StringIO.new(""))).to eq(0)
+        expect(out.string).to include("интерактивный режим")
+      end
     end
   end
 
@@ -355,14 +401,15 @@ RSpec.describe MiniAgent::CLI do
 
     # Размер контекстного окна протокол не сообщает, а знать его надо: в него
     # упирается и рост истории, и max_tokens. У LM Studio он есть в своём
-    # /api/v0/models — оттуда и берём, когда получается.
+    # /api/v1/models — оттуда и берём, когда получается.
     describe "размер контекстного окна" do
       def loaded(size)
-        { "data" => [{ "id" => "qwen", "state" => "loaded", "loaded_context_length" => size }] }.to_json
+        instance = { "id" => "qwen", "config" => { "context_length" => size } }
+        { "models" => [{ "key" => "qwen", "loaded_instances" => [instance] }] }.to_json
       end
 
       it "спрашивает сервер при старте" do
-        stub_request(:get, %r{/api/v0/models}).to_return(status: 200, body: loaded(65_536))
+        stub_request(:get, %r{/api/v1/models}).to_return(status: 200, body: loaded(65_536))
 
         start(["-i", "--base-url", "http://cli.test/v1"], input: StringIO.new("/model\nexit\n"))
 
@@ -376,7 +423,7 @@ RSpec.describe MiniAgent::CLI do
               input: StringIO.new("/model\nexit\n"))
 
         expect(out.string).to include("4096 токенов")
-        expect(a_request(:get, %r{/api/v0/models})).not_to have_been_made
+        expect(a_request(:get, %r{/api/v1/models})).not_to have_been_made
       end
 
       # Так ответит любой сервер, кроме LM Studio. Проба необязательна, и

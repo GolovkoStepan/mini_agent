@@ -35,13 +35,18 @@ module MiniAgent
       Errno::ENETUNREACH, Errno::ETIMEDOUT, SocketError
     ].freeze
 
-    def self.start(argv, out: $stdout, input: $stdin)
-      new(out: out, input: input).start(argv)
+    def self.start(argv, out: $stdout, input: $stdin, reader: nil)
+      new(out: out, input: input, reader: reader).start(argv)
     end
 
-    def initialize(out: $stdout, input: $stdin)
+    # reader внедряется ради тестов: он отвечает сразу на два вопроса —
+    # открывать ли интерактивный режим без задачи и как читать строку, —
+    # и подменить признак терминала у настоящих потоков иначе нельзя,
+    # не втащив Reline в тесты (см. LineReader).
+    def initialize(out: $stdout, input: $stdin, reader: nil)
       @out = out
       @input = input
+      @reader = reader
     end
 
     def start(argv)
@@ -82,13 +87,29 @@ module MiniAgent
       # к серверу незачем, а ConfigError отсюда доходит до start и печатает
       # причину без бэктрейса.
       replay = restore(options, config)
-      return interactive(config, ui, replay) if options[:interactive]
-
       task = args.join(" ").strip
+      return interactive(config, ui, replay) if options[:interactive] || conversational?(task)
       return usage(parser) if task.empty?
 
       single_task(config, ui, replay, task)
     end
+
+    # Задачи нет — открываем диалог, но только на терминале. Безусловный
+    # интерактив выглядит удобнее ровно до первого скрипта с `mini_agent
+    # "$TASK"`, где переменная по ошибке пуста: REPL стартует, первый же
+    # gets возвращает EOF, сессия закрывается — и агент, не сделав ничего,
+    # выходит с нулём. Тот же худший исход, ради невозможности которого
+    # заведены EXIT_UNFINISHED и отказ пустого --resume: молчаливый успех
+    # неотличим от настоящего до тех пор, пока не понадобится результат.
+    # Вне терминала остаётся прежний громкий отказ с подсказкой.
+    #
+    # Явный -i этой проверки не проходит намеренно: он и раньше работал
+    # в пайпе, им пользуются скрипты, и отнимать это молча незачем.
+    def conversational?(task) = task.empty? && reader.interactive?
+
+    # Один на весь запуск: признак терминала и чтение строк — один и тот же
+    # вопрос к одним и тем же потокам, и второй объект разошёлся бы с первым.
+    def reader = @reader ||= LineReader.new(input: @input, output: @out)
 
     # Разовый запуск. Вопроса «выполнять?» при --plan нет намеренно: разовый
     # запуск на то и разовый, а согласие спрашивают в интерактивном режиме,
@@ -144,7 +165,6 @@ module MiniAgent
     # он сам решит, включать ли себя, по признаку терминала у обоих.
     def interactive(config, ui, replay = nil)
       with_connection(config, ui, resume: replay&.path) do |agent, tools|
-        reader = LineReader.new(input: @input, output: @out)
         Repl.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader,
                  conversation: resumed(replay, agent, ui)).run
         # Провал отдельной задачи — не провал сессии: код относится ко всему
