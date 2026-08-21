@@ -21,7 +21,7 @@ bin/setup
 
 ```bash
 gem build mini_agent.gemspec
-gem install ./mini_agent-1.1.0.gem
+gem install ./mini_agent-1.1.1.gem
 ```
 
 ### Адрес LLM-сервера
