@@ -12,6 +12,22 @@ module MiniAgent
   #   Остальные константы — вывод В ТЕРМИНАЛ, его оформление свободно
   #   меняется вместе с UI и на поведение модели не влияет.
   module Messages
+    # Два запрета — «не разворачивай проект» и «не отвязывай работу от вызова» —
+    # стоят здесь, а не только в INIT_REQUEST: сорвался на /init, но принадлежит
+    # это любой задаче. Про отвязанную работу знать особенно важно, потому что
+    # она обходит Ctrl+C, а прерывание в этом агенте — не мелочь: `nohup … &`
+    # возвращает bash мгновенно, ProcessRunner видит успешно завершённую
+    # команду и убивать ему нечего, а сборка живёт дальше. В том срыве она
+    # доделалась через две минуты ПОСЛЕ того, как пользователь остановил
+    # сессию, и поставила на машину ruby, которого он не просил.
+    #
+    # Формы перечислены поимённо (`&`, `nohup`, `disown`, `setsid`) по правилу
+    # PLAN_INSTRUCTION: запрет, не называющий того, что запрещает, модель
+    # применяет ко всему подряд. Денилистом это не закрывается и пробовать
+    # не стоит — за перечисленным идут `brew services`, `launchctl`, `docker
+    # run -d`, и каждый пропуск выглядел бы защитой, которой нет (тот же
+    # довод, что про обход write_file через перенаправление).
+    #
     # ШАБЛОН, а не готовый промпт: потолок вызовов за ход подставляется
     # из ToolCallRunner::MAX_CALLS_PER_TURN (см. Messages.system_prompt).
     # Числа здесь быть не должно — сказанное модели и проверяемое в коде
@@ -61,6 +77,20 @@ module MiniAgent
       passes — inside a directory that is not the one you were asked to work in.
       Use an absolute path only when the target is genuinely outside the
       working directory.
+
+      Do the task you were given, not the work it implies. Setting up what the
+      project needs to run is a separate job, and it is not yours unless asked:
+      do not install language runtimes or packages, do not start containers,
+      databases or services, do not run migrations, do not change global
+      configuration. These outlive the task, the user may not want them, and
+      a machine you provisioned is not the machine the next session gets. If
+      something is missing, say what is missing and stop.
+
+      Never detach work from the call: no `&`, no `nohup`, no `disown`, no
+      `setsid`, no service left running behind you. A detached process keeps
+      going after the call returns — it survives the user's interrupt, nothing
+      reports how it ended, and you cannot say whether it finished or broke.
+      Run it in the foreground and wait, or say it has to be run by hand.
 
       Style:
       - Answer immediately. No preamble, no sign-off, no closing summary.
@@ -193,6 +223,25 @@ module MiniAgent
     # из документации, — оттуда же: неверная команда сборки хуже её отсутствия,
     # потому что выглядит проверенной.
     #
+    # А вот границу этой проверке пришлось назвать отдельно, и это правка по
+    # живому срыву. Требование «выполни каждую команду, которую записываешь»
+    # само по себе толкает достраивать окружение: на чужом Rails-проекте
+    # qwen3.8 не нашла нужного ruby, поставила его через asdf и полезла
+    # поднимать MariaDB в докере — то есть разворачивать проект вместо того,
+    # чтобы его описать. Показательно, что модель сначала рассудила верно
+    # («too heavy-handed for this task», «not worth the effort») и передумала,
+    # ПЕРЕЧИТАВ пункт 2: «The instructions say: Execute each command… —
+    # installing Ruby 3.3.4 is reasonable». Наша же инструкция и перебила её
+    # правильный вывод.
+    #
+    # Поэтому «не смог проверить» перестало быть поражением. Прежний текст
+    # оставлял единственный выход — выбросить команду, и на этом фоне
+    # достроить окружение выглядит разумнее, чем промолчать. Теперь исходов
+    # два, и они по разным основаниям: не подтвердилось, что команда
+    # существует, — выбросить; существует, но здесь не запускается — записать
+    # с причиной. Второе для читателя ценнее проверенного: он тоже сидит
+    # не на той машине, где всё поднято.
+    #
     # Язык берётся из самого проекта: агент запускают и в русских, и в чужих
     # репозиториях, а описание читает потом человек.
     INIT_REQUEST = <<~PROMPT
@@ -201,13 +250,24 @@ module MiniAgent
       The file is read by a coding agent at the start of every session, before
       it sees any task. Write what such an agent must know and cannot guess:
 
+      This is a reading task. Explore the project and describe it — do not set
+      it up, and do not make it runnable.
+
       1. What the project is and what it does — two or three sentences.
       2. How to build, test and lint it. Give the exact commands. RUN each one
          you are about to write down, or list the available targets (`rake -T`,
          `make help`, `npm run`) and copy only names that appear there. An
          import or a mention in the README is not proof a task exists. Omit
-         a command you could not verify: a wrong one is worse than none,
-         because it looks checked.
+         a command you could not confirm exists: a wrong one is worse than
+         none, because it looks checked.
+         Verify with what is already installed here. Do NOT build an
+         environment so that verification becomes possible — that is the task
+         changing shape under you, and it is not the task. A command that
+         demonstrably exists but cannot run on this machine still belongs in
+         the file, with the reason in one clause: "bin/rails test — needs
+         ruby 3.3.4 and a MySQL server, neither present here". The next agent
+         gets more from that than from a command you confirmed by provisioning
+         a machine it will not have.
       3. Layout: which directory holds what. Only what is not obvious.
       4. Conventions a newcomer would violate: language of comments and docs,
          naming, formatting, commit style, anything the project enforces.

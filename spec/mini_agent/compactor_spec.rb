@@ -183,7 +183,10 @@ RSpec.describe MiniAgent::Compactor do
   describe "когда сворачивание не спасает" do
     it "предупреждает, что остаток занят описанием проекта" do
       answer("короткое резюме")
-      big = MiniAgent::History.new(project_context: "описание проекта " * 200)
+      # С запасом, а не впритык к признаку: при `* 200` описание перевешивало
+      # на полторы сотни знаков, и пример упал от подросшего SYSTEM_PROMPT —
+      # то есть проверял размер промпта, а не то, ради чего написан.
+      big = MiniAgent::History.new(project_context: "описание проекта " * 600)
       compactor = described_class.new(client: client, history: big, ui: ui)
 
       compactor.call(talk(big))
