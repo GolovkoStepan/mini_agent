@@ -9,7 +9,7 @@
     "printf 'class Counter\\n  def initialize\\n    @value = 0\\n  end\\nend\\n' > lib/counter.rb"
   ],
   "checks": [
-    "grep -qiE 'не найд|отсутств|не определ|не существ|нет ' ../answer.txt",
+    "grep -qiE 'не найд|отсутств|не определ|не существ|(^|[^[:alnum:]])нет([^[:alnum:]]|$)' ../answer.txt",
     "test \"$(find . -type f | wc -l)\" -eq 2"
   ]
 }
