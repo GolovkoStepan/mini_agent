@@ -234,6 +234,125 @@ RSpec.describe MiniAgent::CLI do
       end
     end
 
+    # Сессия сохраняется сама, и продолжают её тем же журналом: второго
+    # формата у истории нет — Transcript пишет, Replay читает.
+    describe "сессии" do
+      around do |example|
+        Dir.mktmpdir { |dir| example.run(@dir = dir) }
+      end
+
+      def sessions = Dir.glob(File.join(MiniAgent::SessionStore::DIR, "*.jsonl"))
+
+      def run_task(*extra, task: "задача")
+        start(["--base-url", "http://cli.test/v1", "--cwd", @dir, *extra, task])
+      end
+
+      it "сохраняет сессию без единой опции" do
+        expect { run_task }.to change { sessions.length }.by(1)
+      end
+
+      it "сообщает, куда пишется сессия" do
+        run_task
+
+        expect(out.string).to include("Сессия сохраняется: #{MiniAgent::SessionStore::DIR}")
+      end
+
+      it "не сохраняет сессию при --no-session" do
+        expect { run_task("--no-session") }.not_to(change { sessions.length })
+      end
+
+      # Два файла на один диалог — это две правды об одной сессии, и вторую
+      # пришлось бы ещё и выбирать при --resume.
+      it "не заводит вторую сессию, когда журнал назван явно" do
+        log = File.join(@dir, "свой.jsonl")
+
+        expect { run_task("--log", log) }.not_to(change { sessions.length })
+        expect(File.exist?(log)).to be(true)
+      end
+
+      describe "--resume" do
+        # История продолжается ровно та, что уходила модели: сверяем не по
+        # сообщению на экране, а по телу последнего запроса — в примерах
+        # ниже агент запускается дважды, и первый запрос ещё без истории.
+        def sent_messages
+          bodies = []
+          expect(a_request(:post, endpoint)
+            .with { |req| bodies << JSON.parse(req.body)["messages"] }).to have_been_made.at_least_once
+          bodies.last
+        end
+
+        it "продолжает последнюю сессию этого каталога" do
+          run_task(task: "первая задача")
+          run_task("--resume", task: "вторая задача")
+
+          expect(sent_messages.map { |m| m["content"] })
+            .to include("первая задача", "готово", "вторая задача")
+        end
+
+        it "сообщает, какую сессию продолжает" do
+          run_task
+          out.truncate(out.rewind)
+          run_task("--resume")
+
+          expect(out.string).to include("Продолжаем сессию:")
+          # Про запись сказано этой же строкой: файл тот же, и второе
+          # сообщение про тот же путь было бы шумом.
+          expect(out.string).not_to include("Сессия сохраняется:")
+        end
+
+        it "берёт журнал из --log, а не последнюю сессию" do
+          log = File.join(@dir, "вчера.jsonl")
+          run_task("--log", log, task: "вчерашняя задача")
+          run_task(task: "чужая задача")
+          run_task("--log", log, "--resume", task: "сегодняшняя")
+
+          contents = sent_messages.map { |m| m["content"] }
+          expect(contents).to include("вчерашняя задача")
+          expect(contents).not_to include("чужая задача")
+        end
+
+        # Продолженная сессия пишется в тот же файл: иначе один разговор
+        # разъехался бы по двум сессиям каталога, и «последняя» указывала бы
+        # на его половину.
+        it "продолжает писать в тот же файл, а не заводит новый" do
+          run_task
+
+          expect { run_task("--resume") }.not_to(change { sessions.length })
+        end
+
+        # Задача идёт следующим словом argv, и необязательный аргумент у
+        # флага забрал бы её вместо имени файла — молча и с отказом «журнал
+        # не читается», в котором названа задача.
+        it "не принимает задачу за имя файла" do
+          run_task
+          run_task("--resume", task: "вторая задача")
+
+          expect(sent_messages.map { |m| m["content"] }).to include("вторая задача")
+        end
+
+        # Системный промпт собирается заново: в нём рабочий каталог, система
+        # и описание проекта, а они со вчерашней сессией могли измениться.
+        it "не отправляет вчерашний системный промпт вторым" do
+          run_task
+          run_task("--resume")
+
+          expect(sent_messages.count { |m| m["role"] == "system" }).to eq(1)
+        end
+
+        it "отказывается, когда продолжать нечего" do
+          expect(run_task("--resume")).to eq(1)
+          expect(out.string).to include("Продолжать нечего")
+        end
+
+        it "отказывается, когда названного журнала нет" do
+          code = run_task("--log", File.join(@dir, "нет.jsonl"), "--resume")
+
+          expect(code).to eq(1)
+          expect(out.string).to include("Не удалось прочитать журнал")
+        end
+      end
+    end
+
     # Размер контекстного окна протокол не сообщает, а знать его надо: в него
     # упирается и рост истории, и max_tokens. У LM Studio он есть в своём
     # /api/v0/models — оттуда и берём, когда получается.

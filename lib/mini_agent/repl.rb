@@ -8,10 +8,16 @@ module MiniAgent
   # в одном классе значит держать рядом две разные петли с разными условиями
   # выхода.
   class Repl
-    def initialize(agent:, config:, tools:, ui:, reader: nil)
+    # conversation — восстановленная история (--resume) либо nil. Заводить
+    # свою пустую здесь нельзя: она собирается агентом (описание проекта,
+    # журнал, каталог), и второе место сборки уже расходилось с первым.
+    # Действует один раз: /clear на то и очистка, чтобы начать с чистого
+    # листа, а не перечитать продолженную сессию заново.
+    def initialize(agent:, config:, tools:, ui:, reader: nil, conversation: nil)
       @agent = agent
       @config = config
       @ui = ui
+      @resumed = conversation
       @reader = reader || LineReader.new
       # Тот же объект, что у агента и у охраны команд: свой означал бы
       # включённый режим, о котором не знает ни один из них.
@@ -23,7 +29,7 @@ module MiniAgent
     # коду и тестам — так же, как Agent#run возвращает историю, а не текст.
     def run
       greet
-      conversation = new_conversation
+      conversation = @resumed || new_conversation
 
       loop do
         line = read_line

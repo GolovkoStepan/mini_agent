@@ -127,6 +127,36 @@ RSpec.describe MiniAgent::Repl do
     end
   end
 
+  # --resume отдаёт восстановленную историю сюда: своей пустой Repl не
+  # заводит, а продолжает ту, что собрал агент.
+  describe "продолженная сессия" do
+    def repl_from(conversation, input)
+      reader = MiniAgent::LineReader.new(input: StringIO.new(input), output: out)
+      described_class.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader,
+                          conversation: conversation)
+    end
+
+    let(:restored) { MiniAgent::History.new.build.tap { |c| c.user("вчерашняя задача") } }
+
+    it "начинает с восстановленной истории, а не с пустой" do
+      allow(client).to receive(:chat).and_return(["ответ", []])
+
+      conversation = repl_from(restored, "сегодняшняя задача\nexit\n").run
+
+      expect(conversation.to_a.map { |m| m[:content] }).to include("вчерашняя задача")
+    end
+
+    # /clear на то и очистка: перечитать продолженную сессию заново значило
+    # бы сделать её неустранимой.
+    it "не возвращает продолженную историю по /clear" do
+      allow(client).to receive(:chat).and_return(["ответ", []])
+
+      conversation = repl_from(restored, "/clear\nexit\n").run
+
+      expect(conversation.to_a.map { |m| m[:role] }).to eq(%w[system])
+    end
+  end
+
   describe "команды" do
     it "не отдаёт команды модели" do
       allow(client).to receive(:chat)

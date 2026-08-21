@@ -16,6 +16,8 @@ require "fileutils"
 # Ни один тест не должен ходить в сеть: клиент LLM всегда стабится.
 WebMock.disable_net_connect!(allow_localhost: false)
 
+SESSIONS_DIR = File.join(Dir.tmpdir, "mini_agent_сессии_тестов")
+
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
   config.example_status_persistence_file_path = ".rspec_status"
@@ -34,7 +36,14 @@ RSpec.configure do |config|
   # файла зашит в константу. Примеры, которым файл нужен, называют его сами.
   config.before do
     stub_const("MiniAgent::Settings::PATH", File.join(Dir.tmpdir, "mini_agent_нет_настроек.json"))
+    # Сохранение сессий включено по умолчанию, то есть без подмены каталога
+    # каждый прогон тестов насыпал бы полсотни файлов в настоящий
+    # ~/.mini_agent/sessions разработчика. Тот же довод, что и у настроек;
+    # каталог сносится по окончании прогона.
+    stub_const("MiniAgent::SessionStore::DIR", SESSIONS_DIR)
   end
+
+  config.after(:suite) { FileUtils.rm_rf(SESSIONS_DIR) }
 end
 
 # Тесты не должны зависеть от переменных окружения разработчика, поэтому

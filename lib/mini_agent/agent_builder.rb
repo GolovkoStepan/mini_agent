@@ -9,11 +9,14 @@ module MiniAgent
   # Metrics/ClassLength ровно тогда, когда к сборке добавился журнал, и
   # это оказалось верным сигналом — задача действительно чужая.
   class AgentBuilder
-    def initialize(config:, ui:, input: $stdin, output: $stdout)
+    # resume — журнал продолжаемой сессии либо nil. Запись идёт в него же:
+    # новый файл развёл бы один разговор по двум сессиям каталога.
+    def initialize(config:, ui:, input: $stdin, output: $stdout, resume: nil)
       @config = config
       @ui = ui
       @input = input
       @output = output
+      @resume = resume
     end
 
     # Отдаёт блоку собранного агента и реестр инструментов. Соединение с LLM
@@ -75,12 +78,44 @@ module MiniAgent
     # О включённом журнале сообщаем строкой в выводе — по той же причине, что
     # и о подхваченном AGENTS.md: в файл уходят задачи и содержимое всего, что
     # агент прочитал, и молчать о том, что запись идёт, нельзя.
+    #
+    # Названный файл перебивает сохранение сессии: писать одно и то же
+    # в два места незачем, а --resume читает любой журнал одинаково.
     def transcript
-      return nil unless @config.log
+      return open_log(@config.log, Messages::LOG_STARTED) if @config.log
+      return nil unless @config.session?
 
-      log = Transcript.new(@config.log, ui: @ui)
+      session_log
+    end
+
+    # Сессия сохраняется сама, поэтому её неудача не должна ронять запуск:
+    # ни каталог без прав, ни полный диск не повод не начинать задачу.
+    # С названным файлом наоборот — там ConfigError из Transcript доходит
+    # до CLI, потому что о файле просили явно (прецедент --settings).
+    def session_log
+      # Молча: продолжаемый файл CLI назовёт строкой «Продолжаем сессию»,
+      # и вторая строка про тот же путь была бы шумом. Умолчать о записи
+      # это не даёт — путь на экране всё равно есть.
+      return open_log(@resume, nil) if @resume
+
+      store = SessionStore.new
+      path = store.path(@config.cwd || Dir.pwd)
+      return warn_session(store.error) unless path
+
+      open_log(path, Messages::SESSION_STARTED)
+    rescue ConfigError => e
+      warn_session(e.message)
+    end
+
+    def warn_session(message)
+      @ui.warn(format(Messages::SESSION_FAILED, message: message))
+      nil
+    end
+
+    def open_log(path, announcement)
+      log = Transcript.new(path, ui: @ui)
       log.session(@config)
-      @ui.puts(format(Messages::LOG_STARTED, path: @config.log))
+      @ui.puts(format(announcement, path: path)) if announcement
       log
     end
 

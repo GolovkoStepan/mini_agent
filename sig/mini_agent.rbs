@@ -61,7 +61,6 @@ module MiniAgent
   class Config
     DEFAULTS: Hash[Symbol, untyped]
     ENV_KEYS: Hash[Symbol, String]
-    WINDOW_SHARE: Float
 
     attr_reader base_url: String
     attr_reader api_key: String
@@ -79,6 +78,7 @@ module MiniAgent
     def max_tokens: () -> Integer
     def allow_unsafe?: () -> bool
     def plan?: () -> bool
+    def session?: () -> bool
     def markdown?: () -> bool
     def stream?: () -> bool
     def auto_compact?: () -> bool
@@ -155,6 +155,32 @@ module MiniAgent
     def close: () -> void
   end
 
+  class SessionStore
+    DIR: String
+    SLUG_LIMIT: Integer
+    ALLOWED: Regexp
+    FALLBACK_SLUG: String
+
+    attr_reader error: String?
+
+    def initialize: (?dir: String, ?clock: untyped) -> void
+    def path: (String cwd) -> String?
+    def latest: (String cwd) -> String?
+  end
+
+  class Replay
+    DROPPED: Array[String]
+    RESET: Array[String]
+
+    attr_reader path: String
+    attr_reader messages: Array[message]
+    attr_reader broken: Integer
+
+    def initialize: (String path) -> void
+    def empty?: () -> bool
+    def into: (Conversation conversation) -> Conversation
+  end
+
   class History
     attr_accessor project_context: String?
     attr_reader transcript: Transcript?
@@ -188,6 +214,10 @@ module MiniAgent
   class Window
     WARN_AT: Float
     CHARS_PER_TOKEN: Float
+    SHARE: Float
+
+    def self.reserve: (Integer? size, Integer ceiling) -> Integer
+    def self.derived?: (Integer? size, Integer ceiling) -> bool
 
     attr_reader size: Integer?
     attr_reader max_tokens: Integer
@@ -572,7 +602,7 @@ module MiniAgent
   end
 
   class AgentBuilder
-    def initialize: (config: Config, ui: UI, ?input: IO, ?output: IO) -> void
+    def initialize: (config: Config, ui: UI, ?input: IO, ?output: IO, ?resume: String?) -> void
     def call: [T] () { (Agent, ToolRegistry) -> T } -> T
   end
 
@@ -596,7 +626,8 @@ module MiniAgent
   end
 
   class Repl
-    def initialize: (agent: Agent, config: Config, tools: ToolRegistry, ui: UI, ?reader: LineReader?) -> void
+    def initialize: (agent: Agent, config: Config, tools: ToolRegistry, ui: UI, ?reader: LineReader?,
+                     ?conversation: Conversation?) -> void
     def run: () -> Conversation
   end
 

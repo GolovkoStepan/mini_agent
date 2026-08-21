@@ -77,19 +77,63 @@ module MiniAgent
       ui = UI.new(out: @out, markdown: config.markdown?)
 
       return list_models(config, ui) if options[:list_models]
-      return interactive(config, ui) if options[:interactive]
+
+      # Журнал читается до соединения: продолжать нечего — значит и ходить
+      # к серверу незачем, а ConfigError отсюда доходит до start и печатает
+      # причину без бэктрейса.
+      replay = restore(options, config)
+      return interactive(config, ui, replay) if options[:interactive]
 
       task = args.join(" ").strip
       return usage(parser) if task.empty?
 
-      with_connection(config, ui) do |agent|
-        # Вопроса «выполнять?» при --plan нет намеренно: разовый запуск на то
-        # и разовый, а согласие спрашивают в интерактивном режиме, где есть
-        # у кого. Через Planner, а не run: план надо ещё сохранить в файл —
-        # здесь он единственный продукт запуска и живёт до прокрутки буфера.
-        config.plan? ? agent.plan(task, nil, confirm: false) : agent.run(task)
+      single_task(config, ui, replay, task)
+    end
+
+    # Разовый запуск. Вопроса «выполнять?» при --plan нет намеренно: разовый
+    # запуск на то и разовый, а согласие спрашивают в интерактивном режиме,
+    # где есть у кого. Через Planner, а не run: план надо ещё сохранить в
+    # файл — здесь он единственный продукт запуска и живёт до прокрутки буфера.
+    def single_task(config, ui, replay, task)
+      with_connection(config, ui, resume: replay&.path) do |agent|
+        conversation = resumed(replay, agent, ui)
+        config.plan? ? agent.plan(task, conversation, confirm: false) : agent.run(task, conversation: conversation)
         EXIT_CODES.fetch(agent.outcome, EXIT_OK)
       end
+    end
+
+    # Журнал продолжаемой сессии либо nil, если --resume не задавали. Файл
+    # берётся из --log, а при его отсутствии — последняя сессия каталога.
+    #
+    # Отсутствие сессии — отказ, а не молчаливый старт с чистого листа:
+    # попросили продолжить, и «продолжили пустую историю» неотличимо от
+    # «продолжили нужную» ровно до того момента, когда модель ответит
+    # не о том (тот же довод, что у --settings с несуществующим файлом).
+    def restore(options, config)
+      return nil unless options[:resume]
+
+      path = config.log || SessionStore.new.latest(config.cwd || Dir.pwd)
+      raise ConfigError, Messages::RESUME_NONE unless path
+
+      replay = Replay.new(path)
+      raise ConfigError, format(Messages::RESUME_EMPTY, path: path) if replay.empty?
+
+      replay
+    rescue SystemCallError, IOError => e
+      raise ConfigError, format(Messages::RESUME_UNREADABLE, path: path, message: e.message)
+    end
+
+    # Восстановленная история либо nil. Сообщений в ней столько, сколько
+    # осталось после откатов и сворачиваний, — это и печатается: имя файла
+    # состоит из даты и каталога, и по нему одному не видно, то ли продолжили.
+    def resumed(replay, agent, ui)
+      return nil unless replay
+
+      conversation = replay.into(agent.new_conversation)
+      count = Plural.with(replay.messages.size, *Messages::MESSAGES_WORD)
+      ui.puts(format(Messages::RESUMED, path: replay.path, messages: count))
+      ui.warn(format(Messages::RESUME_BROKEN, count: replay.broken)) if replay.broken.positive?
+      conversation
     end
 
     # Файл настроек читает CLI, а не Config: здесь и флаги, и обработка
@@ -98,10 +142,11 @@ module MiniAgent
     # --policy asl — падать громко там, где выбор был бы выдуман).
     # Reline получает те же потоки, что и весь остальной ввод-вывод CLI:
     # он сам решит, включать ли себя, по признаку терминала у обоих.
-    def interactive(config, ui)
-      with_connection(config, ui) do |agent, tools|
+    def interactive(config, ui, replay = nil)
+      with_connection(config, ui, resume: replay&.path) do |agent, tools|
         reader = LineReader.new(input: @input, output: @out)
-        Repl.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader).run
+        Repl.new(agent: agent, config: config, tools: tools, ui: ui, reader: reader,
+                 conversation: resumed(replay, agent, ui)).run
         # Провал отдельной задачи — не провал сессии: код относится ко всему
         # сеансу, а пользователь ошибку уже увидел и мог продолжить работу.
         EXIT_OK
@@ -110,8 +155,8 @@ module MiniAgent
 
     # Код возврата приходит из блока: разовая задача отличает провал запроса
     # от успеха, интерактивный режим всегда отдаёт EXIT_OK.
-    def with_connection(config, ui, &)
-      connecting(config, ui) { with_agent(config, ui, &) }
+    def with_connection(config, ui, resume: nil, &)
+      connecting(config, ui) { with_agent(config, ui, resume, &) }
     end
 
     # Соединение не открылось — показываем адрес и как его сменить вместо
@@ -135,8 +180,12 @@ module MiniAgent
 
     # Сборка агента со всеми зависимостями живёт в AgentBuilder: здесь
     # остаётся командная строка — разбор аргументов и коды возврата.
-    def with_agent(config, ui, &)
-      AgentBuilder.new(config: config, ui: ui, input: @input, output: @out).call(&)
+    # resume — журнал продолжаемой сессии: запись идёт в него же, а не в новый
+    # файл. Иначе история копилась бы в одном файле, а продолжение писалось бы
+    # в другой, и «последняя сессия каталога» указывала бы то на одну, то на
+    # другую половину одного разговора.
+    def with_agent(config, ui, resume, &)
+      AgentBuilder.new(config: config, ui: ui, input: @input, output: @out, resume: resume).call(&)
     end
 
     def handle(action, parser = nil)
