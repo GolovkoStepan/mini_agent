@@ -14,11 +14,16 @@ module MiniAgent
   class LLMError < Error
   end
 
+  class DeadlineError < LLMError
+  end
+
   class ConfigError < Error
   end
 
   module Messages
     SYSTEM_PROMPT: String
+
+    def self.system_prompt: () -> String
     ENVIRONMENT: String
     STOP_MAX_TURNS: String
     EXIT_CODE_PATTERN: Regexp
@@ -498,6 +503,7 @@ module MiniAgent
     DATA_PREFIX: String
     DONE: String
     TAIL_LIMIT: Integer
+    SPECIAL_TOKEN: Regexp
 
     attr_reader usage: json_object?
     attr_reader finish_reason: String?
@@ -514,7 +520,7 @@ module MiniAgent
   end
 
   class StreamRequest
-    def initialize: (http: untyped, ?ui: UI?, ?visible: bool) -> void
+    def initialize: (http: untyped, ?ui: UI?, ?visible: bool, ?deadline: Numeric?) -> void
     def call: (untyped request) -> [untyped, StreamParser]
   end
 
@@ -559,9 +565,17 @@ module MiniAgent
     def to_a: () -> [String, Array[tool_call], json_object?, String?]
   end
 
+  class Connection
+    OPEN_TIMEOUT: Integer
+
+    def initialize: (config: Config) -> void
+    def open: [T] () { () -> T } -> T
+    def http: () -> untyped
+    def drop: () -> void
+  end
+
   class LLMClient
     RETRIABLE: Array[Class]
-    OPEN_TIMEOUT: Integer
 
     def initialize: (config: Config, ?ui: UI?, ?sleeper: untyped, ?transcript: Transcript?) -> void
     def start: [T] () { (LLMClient) -> T } -> T
@@ -574,6 +588,7 @@ module MiniAgent
     SHARE: Float
     REPEAT_LIMIT: Integer
     LOOP_LIMIT: Integer
+    MAX_CALLS_PER_TURN: Integer
 
     type status = :ok | :loop
 

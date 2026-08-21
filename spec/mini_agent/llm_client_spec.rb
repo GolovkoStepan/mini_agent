@@ -507,6 +507,43 @@ RSpec.describe MiniAgent::LLMClient do
       expect(ui).not_to have_received(:stream_chunk)
     end
 
+    # read_timeout у Net::HTTP отмеряется на каждое чтение, поэтому в потоке
+    # он ограничивает паузы между кусками, а не весь ответ: пока сервер шлёт
+    # токены, таймер сбрасывается бесконечно. Живьём это выглядело зависшим
+    # агентом при работающей модели.
+    describe "общий срок на запрос" do
+      # Нулевой срок исчерпан к первому же куску — так ветка проверяется
+      # без ожидания в тесте. Настоящий срок меряется теми же часами.
+      let(:expired) do
+        MiniAgent::Config.new({ base_url: base_url, model: "test-model", retry_delay: 0, llm_timeout: 0 }, env: {})
+      end
+
+      it "останавливает запрос, когда модель пишет дольше срока" do
+        stub_request(:post, endpoint).to_return(
+          status: 200, body: sse(delta(content: "раз"), delta(content: "два", finish_reason: "stop"))
+        )
+
+        expect { described_class.new(config: expired).chat(messages) }
+          .to raise_error(MiniAgent::DeadlineError, /журнале сессии/)
+      end
+
+      # Повтор незачем по той же причине, что и при исчерпанном ожидании:
+      # модель, писавшая без остановки весь срок, во второй раз напишет
+      # столько же.
+      it "не повторяет такой запрос" do
+        stub_request(:post, endpoint).to_return(status: 200, body: sse(delta(content: "раз", finish_reason: "stop")))
+
+        expect { described_class.new(config: expired).chat(messages) }.to raise_error(MiniAgent::DeadlineError)
+        expect(a_request(:post, endpoint)).to have_been_made.once
+      end
+
+      it "укладывается в срок при обычном ответе" do
+        stub_request(:post, endpoint).to_return(status: 200, body: sse(delta(content: "готово", finish_reason: "stop")))
+
+        expect(described_class.new(config: config).chat(messages).first).to eq("готово")
+      end
+    end
+
     it "не просит поток, когда он отключён" do
       plain = described_class.new(
         config: MiniAgent::Config.new({ base_url: base_url, model: "m", stream: false }, env: {})

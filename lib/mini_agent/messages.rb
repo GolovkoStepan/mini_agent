@@ -12,6 +12,11 @@ module MiniAgent
   #   Остальные константы — вывод В ТЕРМИНАЛ, его оформление свободно
   #   меняется вместе с UI и на поведение модели не влияет.
   module Messages
+    # ШАБЛОН, а не готовый промпт: потолок вызовов за ход подставляется
+    # из ToolCallRunner::MAX_CALLS_PER_TURN (см. Messages.system_prompt).
+    # Числа здесь быть не должно — сказанное модели и проверяемое в коде
+    # обязаны быть одним значением, иначе они разойдутся при первой правке
+    # и промпт начнёт обещать потолок, которого нет.
     SYSTEM_PROMPT = <<~PROMPT
       You are a coding agent. Your job is to help the user with programming tasks.
 
@@ -33,6 +38,14 @@ module MiniAgent
       2. Explore with `bash` and `read_file`; change files with `write_file` and `edit_file`.
       3. After gathering enough information or completing the task, give your final answer in natural language.
       4. To finish, reply with a regular message (no tool call).
+
+      Ask for at most %<calls>d tool calls in one reply, and for a single one when
+      the next step depends on what the previous one returns. Calls past that
+      limit are not executed: you are told to repeat them on the next turn, and
+      this turn is spent for nothing. A long list of calls is also what runs a
+      reply out of tokens — it gets cut off in the middle of an argument and the
+      whole reply is lost. Working in small batches costs nothing: there is
+      always another turn.
 
       Each `bash` call runs in a fresh shell. Nothing carries over between calls:
       not the working directory, not environment variables, not shell functions.
@@ -60,6 +73,11 @@ module MiniAgent
       - Say plainly when something failed or you don't know. Do not guess a
         file path, a command name or an output you have not seen.
     PROMPT
+
+    # Готовый системный промпт. Метод, а не константа: подстановка на месте
+    # определения потребовала бы, чтобы ToolCallRunner грузился раньше
+    # Messages, а его грузят одним из последних — Messages нужен почти всем.
+    def self.system_prompt = format(SYSTEM_PROMPT, calls: ToolCallRunner::MAX_CALLS_PER_TURN)
 
     # Где агент работает. Приклеивается к системному промпту тем же способом,
     # что и описание проекта.
@@ -315,6 +333,17 @@ module MiniAgent
       # режиме — история остаётся, и без ответа на вызов в ней была бы дыра.
       LOOPED = "Эта команда вызвана третий раз подряд с теми же аргументами. Она не " \
                "выполнялась; задача остановлена."
+      # Вызов сверх потолка на ход. Прямо сказано, что вызов не потерян и его
+      # можно повторить: без этого модель либо отчитается о сделанном (грабли
+      # CANCELLED), либо примет отказ за окончательный и бросит начатое.
+      # Названа и причина, по которой потолок вообще есть, — на длинном
+      # перечислении модель обрывается по лимиту токенов и теряет весь ход.
+      DEFERRED = "Этот вызов НЕ выполнялся: за один ответ выполняется не больше %<limit>d вызовов, " \
+                 "остальные откладываются. Ничего не потеряно — вызови его следующим ходом. " \
+                 "Не утверждай, что действие выполнено. Дальше работай меньшими порциями: " \
+                 "не больше %<limit>d вызовов за раз, а когда следующий шаг зависит от результата " \
+                 "предыдущего — по одному. Длинное перечисление вызовов обрывается по лимиту " \
+                 "токенов, и тогда пропадает весь ответ целиком."
       # Ctrl+C, пришедший на этой команде. Нужна по той же причине, что и
       # LOOPED: ответ на каждый tool_call_id обязан лежать в истории, иначе
       # следующая задача интерактивного режима уходит с дырой.
@@ -492,6 +521,15 @@ module MiniAgent
     # обычный вопрос занимает под три минуты при потолке в две.
     TIMEOUT_ERROR = "Модель не ответила за %<limit>d с. Если она просто медленная, " \
                     "увеличьте --llm-timeout или LLM_TIMEOUT."
+    # Общий срок на запрос исчерпан. Разведено с TIMEOUT_ERROR намеренно:
+    # там сервер молчал, здесь он присылал текст всё это время, и совет
+    # «поднимите лимит» тут чаще всего вреден — модель не медленная,
+    # а зациклилась, и лишние минуты она потратит так же. Поэтому первым
+    # назван журнал: в нём видно, на что ушли токены.
+    DEADLINE_ERROR = "Модель генерировала ответ дольше %<limit>d с — запрос остановлен. " \
+                     "Это не обрыв связи: текст шёл всё это время. Обычно так выглядит " \
+                     "зацикливание на размышлениях — что она писала, видно в журнале сессии. " \
+                     "Если модель просто медленная, увеличьте --llm-timeout или LLM_TIMEOUT."
     UNKNOWN_ERROR = "Неизвестная ошибка: %<message>s"
     INVALID_JSON = "Некорректный JSON в ответе: %<message>s"
     NOT_CONNECTED = "HTTP-соединение не установлено: вызовите LLMClient#start с блоком."
@@ -596,6 +634,15 @@ module MiniAgent
     # от Agent нет, чтобы одно и то же событие не объявлялось дважды.
     REPEATED_CALL = "Повтор вызова: команда та же — не выполняется, модели возвращён прежний результат."
     LOOP_ABORTED = "Тот же вызов третий раз подряд — агент зациклился, задача остановлена."
+    # Печатается один раз на ход, перед отложенными вызовами. Про остановку
+    # не говорит намеренно: задача продолжается, отложенное придёт следующим
+    # ходом, — и обещать иное значило бы пугать штатным событием.
+    #
+    # Число подано как «выполнено %d», а не «больше %d вызовов»: после
+    # «больше» существительное согласуется с числом, и строке понадобился бы
+    # Plural ради константы, которая не меняется.
+    TOO_MANY_CALLS = "Слишком много вызовов в одном ответе: выполнено %<limit>d, " \
+                     "остальные отложены до следующего хода."
     SUMMARY_FAILED = "Не удалось получить итоговый ответ: %<message>s"
     TURN_ROLLED_BACK = "Неудачный ход снят с истории. Если ошибка повторяется — /clear."
 

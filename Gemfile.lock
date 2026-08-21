@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    mini_agent (1.1.1)
+    mini_agent (1.1.2)
 
 GEM
   remote: https://rubygems.org/

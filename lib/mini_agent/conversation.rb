@@ -20,7 +20,7 @@ module MiniAgent
     # логирование в Agent пришлось бы дублировать на каждом таком месте.
     # cwd — каталог, в котором выполняются команды. Попадает в промпт, потому
     # что иначе модель его выдумывает (см. Messages::ENVIRONMENT).
-    def initialize(system_prompt: Messages::SYSTEM_PROMPT, project_context: nil, transcript: nil, cwd: nil)
+    def initialize(system_prompt: Messages.system_prompt, project_context: nil, transcript: nil, cwd: nil)
       @messages = []
       @transcript = transcript
       @project_context_size = 0

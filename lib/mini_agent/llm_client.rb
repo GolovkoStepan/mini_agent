@@ -13,8 +13,6 @@ module MiniAgent
       IOError, EOFError
     ].freeze
 
-    OPEN_TIMEOUT = 10
-
     # transcript — журнал, и попадает он сюда, а не только в Conversation,
     # ради размышлений модели: те приходят в ответе, но в историю не идут
     # никогда, так что другого места, где их видно, попросту нет.
@@ -23,21 +21,14 @@ module MiniAgent
       @ui = ui
       @sleeper = sleeper
       @transcript = transcript
-      @http = nil
+      @connection = Connection.new(config: config)
       @retry_after = nil
       @stream = nil
     end
 
     # Держит одно соединение на всё время работы блока.
     def start
-      uri = @config.chat_uri
-      http = build_http(uri)
-      http.start unless http.started?
-      @http = http
-      yield self
-    ensure
-      @http&.finish if @http&.started?
-      @http = nil
+      @connection.open { yield self }
     end
 
     # Возвращает [content, tool_calls, usage, finish_reason].
@@ -68,7 +59,7 @@ module MiniAgent
     # Список моделей, загруженных на сервере: массив имён. Сам запрос живёт
     # в ModelsRequest — это справочная команда без повторов, а не диалог.
     def models
-      ModelsRequest.new(config: @config, http: connection).call
+      ModelsRequest.new(config: @config, http: @connection.http).call
     end
 
     private
@@ -80,23 +71,35 @@ module MiniAgent
       last_error = nil
 
       @config.retry_count.times do |attempt|
-        response = perform(body)
-      rescue *RETRIABLE => e
-        timed_out if e.is_a?(Net::ReadTimeout)
-        last_error = format(Messages::NETWORK_ERROR, message: e.message)
-        pause
-      rescue StandardError => e
-        last_error = format(Messages::UNKNOWN_ERROR, message: e.message)
-        pause
-      else
-        result = interpret(response, attempt)
+        result, last_error = attempt_once(body, attempt)
         return result if result
 
-        last_error = @last_reason
         pause
       end
 
       raise LLMError, format(Messages::LLM_FAILED, count: @config.retry_count, error: last_error)
+    end
+
+    # Одна попытка: [результат, причина неудачи]. Отделена от цикла потому,
+    # что исходов у неё больше двух — ответ годится, ответ не годится и его
+    # стоит запросить снова, запрос провалился так, что повторять его нельзя,
+    # — и все три пришлось бы разбирать вперемешку с паузами и счётом попыток.
+    def attempt_once(body, attempt)
+      response = perform(body)
+    rescue DeadlineError
+      # Повторять незачем по той же причине, что и исчерпанное ожидание:
+      # модель, писавшая без остановки весь срок, во второй раз напишет
+      # столько же. Клаузула стоит перед StandardError, иначе общая ветка
+      # увела бы это в обычный повтор.
+      raise
+    rescue *RETRIABLE => e
+      timed_out if e.is_a?(Net::ReadTimeout)
+      [nil, format(Messages::NETWORK_ERROR, message: e.message)]
+    rescue StandardError => e
+      [nil, format(Messages::UNKNOWN_ERROR, message: e.message)]
+    else
+      result = interpret(response, attempt)
+      [result, result ? nil : @last_reason]
     end
 
     # Единственная ошибка из RETRIABLE, которую повторять незачем: модель
@@ -116,17 +119,29 @@ module MiniAgent
       return stream(request) if @config.stream?
 
       @stream = nil
-      with_spinner { connection.request(request) }
+      with_spinner { @connection.http.request(request) }
     end
 
     # Потоковый ответ разбирается по мере чтения, поэтому к моменту возврата
     # он уже собран: interpret возьмёт его из @stream вместо разбора тела.
     # Ответ всё равно возвращается — по нему определяется код HTTP, и ветка
     # ошибок остаётся общей для обоих режимов.
+    # llm_timeout уходит сюда общим сроком, а не заводится вторым числом:
+    # для человека это одно и то же «сколько ждать ответа модели», и второй
+    # флаг пришлось бы согласовывать с первым при каждой правке. Тому же
+    # числу остаётся и роль read_timeout: пауза между кусками, превышающая
+    # весь срок, законной быть не может.
     def stream(request)
-      response, parser = StreamRequest.new(http: connection, ui: @ui, visible: @visible).call(request)
+      response, parser = StreamRequest.new(
+        http: @connection.http, ui: @ui, visible: @visible, deadline: @config.llm_timeout
+      ).call(request)
       @stream = parser
       response
+    rescue DeadlineError
+      # Гасится здесь, а не в цикле попыток: сокет испортило само чтение,
+      # оборванное на полуслове, — прибирать за ним тому, кто читал.
+      @connection.drop
+      raise
     end
 
     def headers
@@ -185,23 +200,6 @@ module MiniAgent
       @last_reason = error.to_s
       @retry_after = error.retry_after
       nil
-    end
-
-    # Соединение поднимается лениво: в исходном скрипте вызов run без
-    # предварительного start_http падал с NoMethodError на nil.
-    def connection
-      @http ||= build_http(@config.chat_uri) # rubocop:disable Naming/MemoizedInstanceVariableName
-    end
-
-    def build_http(uri)
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = @config.use_ssl?
-      http.open_timeout = OPEN_TIMEOUT
-      # Ожидание ответа настраивается, а открытие соединения — нет: сервер
-      # либо отзывается сразу, либо его нет, и десяти секунд на это хватает
-      # при любой скорости модели. Медленной бывает генерация, а не TCP.
-      http.read_timeout = @config.llm_timeout
-      http
     end
 
     def with_spinner(&)

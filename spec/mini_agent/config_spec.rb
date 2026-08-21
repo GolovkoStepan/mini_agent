@@ -5,7 +5,7 @@ RSpec.describe MiniAgent::Config do
     it "берёт значение по умолчанию, когда нет ни опций, ни ENV" do
       config = described_class.new({}, env: {})
 
-      expect(config.model).to eq("qwen/qwen3.6-35b-a3b")
+      expect(config.model).to eq("qwen/qwen3.8-27b")
       expect(config.max_turns).to eq(50)
     end
 
@@ -37,7 +37,7 @@ RSpec.describe MiniAgent::Config do
     it "игнорирует пустую переменную окружения" do
       config = described_class.new({}, env: { "LLM_MODEL" => "" })
 
-      expect(config.model).to eq("qwen/qwen3.6-35b-a3b")
+      expect(config.model).to eq("qwen/qwen3.8-27b")
     end
   end
 

@@ -32,6 +32,15 @@ module MiniAgent
   # Не удалось получить корректный ответ от LLM после всех попыток.
   class LLMError < Error; end
 
+  # Модель не уложилась в общий срок на запрос и была остановлена на полуслове.
+  #
+  # Отдельно от LLMError, хотя и наследует его: там сервер не ответил, здесь
+  # он отвечал всё это время — молчание и безостановочная генерация лечатся
+  # по-разному, и одно сообщение на оба случая уводило бы от причины.
+  # Повторять такой запрос незачем (см. LLMClient#attempts), поэтому наверх
+  # он уходит тем же типом, что и прочие неудачи запроса.
+  class DeadlineError < LLMError; end
+
   # Настройки заданы неверно: например, указан несуществующий каталог.
   # Проверяется до запуска, чтобы ошибка не всплыла посреди работы.
   class ConfigError < Error; end
@@ -64,6 +73,7 @@ require_relative "mini_agent/error_response"
 require_relative "mini_agent/chat_response"
 require_relative "mini_agent/stream_parser"
 require_relative "mini_agent/stream_request"
+require_relative "mini_agent/connection"
 require_relative "mini_agent/models_request"
 require_relative "mini_agent/window_probe"
 require_relative "mini_agent/llm_client"

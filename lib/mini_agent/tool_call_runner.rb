@@ -44,6 +44,22 @@ module MiniAgent
     REPEAT_LIMIT = 2
     LOOP_LIMIT = 3
 
+    # Сколько вызовов одного хода выполняется. Остальные не выполняются, и
+    # модели на них отвечают просьбой работать меньшими порциями.
+    #
+    # Заведено по живому срыву: на /init по чужому репозиторию qwen3.6-35b
+    # вернула в одном ответе 13 разных вызовов и упёрлась в max_tokens на
+    # четырнадцатом — то есть ход пропал целиком, вместе с оборванным JSON
+    # аргументов. Повтором это не было ни разу, поэтому REPEAT_LIMIT
+    # и LOOP_LIMIT не сработали и сработать не могли: они ловят топтание
+    # на месте, а здесь модель безостановочно перечисляла новое.
+    #
+    # Пять, а не тринадцать с запасом: несколько чтений разом — обычное дело,
+    # и обрезать их незачем, но и цена ошибки в меньшую сторону мала. Лишний
+    # вызов не теряется, он лишь откладывается на следующий ход, так что
+    # низкий потолок стоит одного хода, а высокий — целого сорванного ответа.
+    MAX_CALLS_PER_TURN = 5
+
     # config необязателен: без него остаётся один потолок в знаках — ровно
     # то же, что при неизвестном размере окна.
     def initialize(tools:, ui:, config: nil)
@@ -81,8 +97,8 @@ module MiniAgent
     # «останови», а не «сделай вид, что ничего не было».
     def call_all(conversation, tool_calls)
       answered = 0
-      statuses = tool_calls.map do |tool_call|
-        status = call(conversation, tool_call)
+      statuses = tool_calls.map.with_index do |tool_call, index|
+        status = index < MAX_CALLS_PER_TURN ? call(conversation, tool_call) : defer(conversation, tool_call, index)
         answered += 1
         status
       end
@@ -118,6 +134,22 @@ module MiniAgent
     end
 
     private
+
+    # Вызов сверх потолка. Задача не обрывается: исход :ok, и модель получает
+    # обычный ответ инструмента — отложенное она вызовет следующим ходом.
+    #
+    # Стоит ДО call, а значит и до count_repeat: неисполненный вызов повтором
+    # не считается. Иначе отложенное, повторённое следующим ходом (то есть
+    # ровно то, о чём просит ответ), выглядело бы топтанием на месте.
+    #
+    # На экран предупреждение идёт один раз на ход, а не на каждый вызов:
+    # число отложенных видно по самим строкам вызовов.
+    def defer(conversation, tool_call, index)
+      @ui.warn(format(Messages::TOO_MANY_CALLS, limit: MAX_CALLS_PER_TURN)) if index == MAX_CALLS_PER_TURN
+      text = format(Messages::Tool::DEFERRED, limit: MAX_CALLS_PER_TURN)
+      conversation.tool(Conversation.tool_call_id(tool_call), text)
+      :ok
+    end
 
     # Первый недошедший вызов — тот, на котором пришёл Ctrl+C: он выполнялся
     # и был убит на полпути. Остальные не начинались вовсе, и это известно

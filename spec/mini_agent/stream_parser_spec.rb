@@ -211,6 +211,42 @@ RSpec.describe MiniAgent::StreamParser do
       expect(parser.reasoning_tail).to eq("щ" * described_class::TAIL_LIMIT)
       expect(parser.reasoning_tail).to be_valid_encoding
     end
+
+    # Поймано живьём: в спиннере сорвавшейся задачи стояло
+    # «размышления: 23 знака │ <|mask_start|><think>» — по этой строке было
+    # не отличить работающую модель от сломавшейся.
+    it "не показывает служебные токены шаблона" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "<|mask_start|><think>" }))
+
+      expect(parser.reasoning_tail).to eq("")
+    end
+
+    it "оставляет вокруг них живой текст" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "<think>Надо подумать</think>" }))
+
+      expect(parser.reasoning_tail).to eq("Надо подумать")
+    end
+
+    # Утёкший токен — это диагноз, и в журнале он обязан остаться: чистка
+    # касается только показа.
+    it "хранит их в самом тексте размышлений" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "<|mask_start|>" }))
+
+      expect(parser.reasoning).to eq("<|mask_start|>")
+      expect(parser.reasoning_length).to eq(14)
+    end
+
+    # Режь мы ровно по лимиту, разрез пришёлся бы на середину токена и наружу
+    # вылез бы огрызок вроде `k_start|>` — ровно то, от чего чистка заводилась.
+    it "не оставляет огрызка токена на границе среза" do
+      parser = described_class.new
+      parser.feed(chunk({ "reasoning_content" => "<|mask_start|>#{"я" * described_class::TAIL_LIMIT}" }))
+
+      expect(parser.reasoning_tail).to eq("я" * described_class::TAIL_LIMIT)
+    end
   end
 
   # Кортеж — тот же, что у ChatResponse: дальше по коду разницы между

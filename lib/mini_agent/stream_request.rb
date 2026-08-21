@@ -23,13 +23,26 @@ module MiniAgent
     # ожидание считается от последнего полученного, а не от начала запроса.
     # Гасится ровно печать текста — ход размышлений в спиннере остаётся,
     # иначе долгое сворачивание выглядело бы зависанием.
-    def initialize(http:, ui: nil, visible: true)
+    # deadline — общий срок на запрос в секундах, от отправки до последнего
+    # куска. Именно здесь он и нужен: read_timeout у Net::HTTP отмеряется
+    # НА КАЖДОЕ ЧТЕНИЕ, поэтому в потоке он сбрасывается с каждым куском
+    # и модель, которая пишет без остановки, не упирается в него никогда.
+    # Найдено живьём: агент выглядел зависшим, а сервер декодировал девятый
+    # килотокен и продолжал. Необязателен: без него остаётся прежнее
+    # поведение — ограничены только паузы между кусками.
+    def initialize(http:, ui: nil, visible: true, deadline: nil)
       @http = http
       @ui = ui
       @visible = visible
+      @deadline = deadline
     end
 
     def call(request)
+      # Отсчёт с монотонных часов, а не со стенных: перевод времени
+      # (сеть, зимнее время) не должен ни продлевать срок, ни обрывать
+      # работающий запрос. Считается от отправки, поэтому в срок входит
+      # и ожидание первого куска.
+      @started_at = now
       parser = StreamParser.new { |text| @ui&.stream_chunk(text) if @visible }
       response = with_spinner { @http.request(request) { |result| read(result, parser) } }
 
@@ -74,11 +87,29 @@ module MiniAgent
     # и показывается всегда, бегущая строка занимает остаток ширины.
     def consume(parser, chunk)
       parser.feed(chunk)
+      check_deadline
       return unless parser.reasoning_length.positive?
 
       @ui&.progress = format(Messages::REASONING_PROGRESS,
                              count: Plural.with(parser.reasoning_length, *Messages::CHARS))
       @ui&.ticker = parser.reasoning_tail
     end
+
+    # Проверяется на каждом куске, а не по таймеру в отдельном потоке: куски
+    # при безостановочной генерации идут часто, и точности этого хватает,
+    # а поток пришлось бы ещё и прибирать. Обратный случай — сервер замолчал
+    # посреди ответа — ловится read_timeout и сюда не доходит.
+    #
+    # Накопленное к этому моменту не спасается: оборванный ответ модели ничем
+    # не лучше пустого (тот же довод, что при обрыве по max_tokens в Compactor),
+    # а вызов инструмента с обрезанными аргументами и вовсе уехал бы
+    # в parse_arguments «битым JSON от модели».
+    def check_deadline
+      return if @deadline.nil? || now - @started_at <= @deadline
+
+      raise DeadlineError, format(Messages::DEADLINE_ERROR, limit: @deadline)
+    end
+
+    def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   end
 end

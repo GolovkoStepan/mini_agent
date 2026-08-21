@@ -13,7 +13,7 @@ RSpec.describe MiniAgent::ChatPayload do
     it "кладёт модель, сообщения и лимит генерации" do
       result = body
 
-      expect(result["model"]).to eq("qwen/qwen3.6-35b-a3b")
+      expect(result["model"]).to eq("qwen/qwen3.8-27b")
       expect(result["messages"]).to eq([{ "role" => "user", "content" => "привет" }])
       expect(result["max_tokens"]).to eq(16_384)
     end

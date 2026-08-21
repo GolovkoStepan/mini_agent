@@ -153,6 +153,70 @@ RSpec.describe MiniAgent::ToolCallRunner do
     end
   end
 
+  describe "потолок вызовов за ход" do
+    def calls(count)
+      Array.new(count) do |index|
+        { "id" => "call_#{index}",
+          "function" => { "name" => "echo", "arguments" => { "text" => index.to_s }.to_json } }
+      end
+    end
+
+    let(:over) { described_class::MAX_CALLS_PER_TURN + 3 }
+
+    it "выполняет вызовы до потолка и не выполняет остальные" do
+      runner.call_all(conversation, calls(over))
+
+      expect(echo_tool.calls.length).to eq(described_class::MAX_CALLS_PER_TURN)
+    end
+
+    # Ответ обязан прийти на каждый tool_call_id: брошенный без ответа вызов
+    # оставляет в истории дыру, от которой валится следующий запрос.
+    it "всё равно отвечает на каждый вызов" do
+      runner.call_all(conversation, calls(over))
+
+      answers = conversation.to_a.select { |message| message[:role] == "tool" }
+      expect(answers.map { |message| message[:tool_call_id] }).to eq(calls(over).map { |call| call["id"] })
+    end
+
+    # Задача не обрывается: отложенное модель вызовет следующим ходом.
+    it "не обрывает задачу" do
+      expect(runner.call_all(conversation, calls(over))).to eq(:ok)
+    end
+
+    # Короткого отказа модели мало — на нём она рапортует о сделанном
+    # (те же грабли, что у Messages::Tool::CANCELLED). Сказано и то, что
+    # вызов не потерян: иначе она бросит начатое.
+    it "объясняет модели, что вызов не выполнялся и не потерян" do
+      runner.call_all(conversation, calls(over))
+
+      content = conversation.to_a.last[:content]
+      expect(content).to include("НЕ выполнялся", "следующим ходом", "меньшими порциями")
+    end
+
+    it "предупреждает на экране один раз за ход" do
+      runner.call_all(conversation, calls(over))
+
+      expect(out.string.scan("Слишком много вызовов").length).to eq(1)
+    end
+
+    # Неисполненный вызов повтором не считается: следующим ходом модель
+    # повторит его — ровно то, о чём просит ответ, — и счёт повторов
+    # объявил бы это топтанием на месте.
+    it "не считает отложенный вызов повтором" do
+      runner.call_all(conversation, calls(over))
+      runner.call_all(conversation, calls(over).last(1))
+
+      expect(echo_tool.calls.length).to eq(described_class::MAX_CALLS_PER_TURN + 1)
+    end
+
+    it "не трогает ход, укладывающийся в потолок" do
+      runner.call_all(conversation, calls(described_class::MAX_CALLS_PER_TURN))
+
+      expect(echo_tool.calls.length).to eq(described_class::MAX_CALLS_PER_TURN)
+      expect(out.string).not_to include("Слишком много вызовов")
+    end
+  end
+
   describe "усечение результата" do
     let(:long_tool) do
       Class.new do
