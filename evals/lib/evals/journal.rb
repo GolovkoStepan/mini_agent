@@ -46,7 +46,7 @@ module Evals
 
     # Контекст на последнем запросе — то самое число, что упирается в окно.
     # Сумма prompt_tokens смысла не имеет: история уходит модели целиком
-    # на каждом ходу (см. Usage в CLAUDE.md).
+    # на каждом ходу (см. Usage в AGENTS.md).
     def context_tokens = usages.filter_map { |usage| usage["prompt_tokens"] }.last
 
     def generated_tokens = usages.sum { |usage| usage["completion_tokens"].to_i }
