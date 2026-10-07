@@ -15,9 +15,9 @@ Gem::Specification.new do |spec|
                      "OpenAI-совместимый эндпоинт."
   spec.homepage = "https://github.com/GolovkoStepan/mini_agent"
   spec.license = "MIT"
-  # 3.3 — нижняя граница dev-зависимостей (parallel через rubocop, rbs, rdoc);
-  # на более старых не встаёт bundle, поэтому и обещать их нельзя.
-  spec.required_ruby_version = ">= 3.3.0"
+  # Нижняя граница — 4.0: здесь проект ведётся и проверяется (CI гоняет ту же
+  # версию). Более старые версии не обещаем и не проверяем.
+  spec.required_ruby_version = ">= 4.0.0"
 
   spec.metadata["allowed_push_host"] = "https://rubygems.org"
 

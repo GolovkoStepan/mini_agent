@@ -18,8 +18,8 @@ RSpec.describe Evals::Runner do
   # Агент запускается по-настоящему, но с --version: он разбирает все флаги
   # и выходит, не открывая соединения. Иначе спека либо ходила бы в сеть,
   # либо проверяла подделку вместо настоящей командной строки.
-  def runner(**options)
-    described_class.new(root: root, out_dir: out, extra: ["--version"], **options)
+  def runner(**)
+    described_class.new(root: root, out_dir: out, extra: ["--version"], **)
   end
 
   describe "#command" do
